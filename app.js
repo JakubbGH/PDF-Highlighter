@@ -2,11 +2,18 @@
   "use strict";
 
   const STORAGE_KEY = "floor-plan-progress-tracker";
+  const VBA_PROJECT_STORAGE_KEY = "floor-plan-progress-tracker-vba-project";
   const PDF_WORKER_SRC = "vendor/pdf.worker.min.js";
   const PDF_RENDER_LONG_EDGE = 2400;
   const EXCEL_VBA_PROJECT_SRC = "vendor/excel/vbaProject.bin";
+  const PLACEHOLDER_VBA_PROJECT_SHA256 = "0ced1464b3677e98f5e3a8c5d80135e18dc98dca39299f1a8cfd2a00999fbf9f";
+  const PLACEHOLDER_VBA_PROJECT_BYTES = 15872;
   const EXCEL_PLAN_TOP_OFFSET = 84;
   const EMUS_PER_PIXEL = 9525;
+  const DEFLATE_LENGTH_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+  const DEFLATE_LENGTH_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  const DEFLATE_DISTANCE_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+  const DEFLATE_DISTANCE_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
   const PROGRESS_COLORS = {
     low: [216, 66, 47],
     mid: [217, 163, 33],
@@ -72,10 +79,14 @@
     importCsvButton: document.getElementById("importCsvButton"),
     exportCsvButton: document.getElementById("exportCsvButton"),
     exportExcelButton: document.getElementById("exportExcelButton"),
+    installMacroButton: document.getElementById("installMacroButton"),
+    clearMacroButton: document.getElementById("clearMacroButton"),
+    macroStatus: document.getElementById("macroStatus"),
     resetSampleButton: document.getElementById("resetSampleButton"),
     planFileInput: document.getElementById("planFileInput"),
     projectFileInput: document.getElementById("projectFileInput"),
-    csvFileInput: document.getElementById("csvFileInput")
+    csvFileInput: document.getElementById("csvFileInput"),
+    macroTemplateInput: document.getElementById("macroTemplateInput")
   };
 
   let state = loadInitialProject();
@@ -92,6 +103,7 @@
     configurePdfRenderer();
     bindEvents();
     loadPlanImage(state.plan.src);
+    renderMacroStatus();
     render();
   }
 
@@ -176,6 +188,9 @@
     el.csvFileInput.addEventListener("change", handleCsvFile);
     el.exportCsvButton.addEventListener("click", downloadCsv);
     el.exportExcelButton.addEventListener("click", downloadExcelWorkbook);
+    el.installMacroButton.addEventListener("click", () => el.macroTemplateInput.click());
+    el.clearMacroButton.addEventListener("click", clearInstalledMacroTemplate);
+    el.macroTemplateInput.addEventListener("change", handleMacroTemplateFile);
     el.resetSampleButton.addEventListener("click", () => {
       if (!confirm("Reload the sample project? Unsaved changes in this browser will be replaced.")) return;
       state = clone(SAMPLE_PROJECT);
@@ -640,9 +655,9 @@
     el.saveStatus.textContent = "Building XLSM...";
 
     try {
-      const blob = await buildExcelWorkbook();
-      downloadBlob(`${safeFileName(state.name)}-floor-plan-progress.xlsm`, blob);
-      el.saveStatus.textContent = "Autosaved";
+      const workbook = await buildExcelWorkbook();
+      downloadBlob(`${safeFileName(state.name)}-floor-plan-progress.xlsm`, workbook.blob);
+      el.saveStatus.textContent = workbook.macroProject.live ? "Live XLSM exported" : "Snapshot exported";
     } catch (error) {
       alert(error.message || "The Excel workbook could not be exported.");
       console.error(error);
@@ -652,9 +667,45 @@
     }
   }
 
+  async function handleMacroTemplateFile() {
+    const [file] = el.macroTemplateInput.files;
+    if (!file) return;
+
+    el.installMacroButton.disabled = true;
+    el.saveStatus.textContent = "Installing macro...";
+
+    try {
+      const workbookBytes = new Uint8Array(await file.arrayBuffer());
+      const vbaProject = await extractVbaProjectFromWorkbook(workbookBytes);
+      if (await isPlaceholderVbaProject(vbaProject)) {
+        throw new Error("That workbook contains the placeholder sample macro, not the floor plan refresh macro.");
+      }
+
+      saveInstalledVbaProject(vbaProject, file.name);
+      el.saveStatus.textContent = "Macro installed";
+      renderMacroStatus();
+      alert("Excel macro template installed locally. Future XLSM exports from this browser will update box colours and labels when macros are enabled in Excel.");
+    } catch (error) {
+      alert(error.message || "The macro template could not be installed.");
+      console.error(error);
+      el.saveStatus.textContent = "Use Save";
+    } finally {
+      el.installMacroButton.disabled = false;
+      el.macroTemplateInput.value = "";
+    }
+  }
+
+  function clearInstalledMacroTemplate() {
+    if (!confirm("Remove the locally installed Excel macro template from this browser?")) return;
+
+    localStorage.removeItem(VBA_PROJECT_STORAGE_KEY);
+    el.saveStatus.textContent = "Macro removed";
+    renderMacroStatus();
+  }
+
   async function buildExcelWorkbook() {
     const planImage = await renderPlanToPng();
-    const vbaProject = await loadVbaProject();
+    const macroProject = await loadVbaProject();
     const rooms = state.rooms
       .slice()
       .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -664,20 +715,23 @@
       ["xl/workbook.xml", workbookXml()],
       ["xl/_rels/workbook.xml.rels", workbookRelsXml()],
       ["xl/styles.xml", stylesXml()],
-      ["xl/worksheets/sheet1.xml", planSheetXml()],
+      ["xl/worksheets/sheet1.xml", planSheetXml(macroProject)],
       ["xl/worksheets/_rels/sheet1.xml.rels", planSheetRelsXml()],
-      ["xl/worksheets/sheet2.xml", progressSheetXml(rooms)],
+      ["xl/worksheets/sheet2.xml", progressSheetXml(rooms, macroProject)],
       ["xl/drawings/drawing1.xml", drawingXml(rooms, planImage.width, planImage.height)],
       ["xl/drawings/_rels/drawing1.xml.rels", drawingRelsXml()],
       ["xl/media/floor-plan.png", planImage.bytes],
-      ["xl/vbaProject.bin", vbaProject],
+      ["xl/vbaProject.bin", macroProject.bytes],
       ["docProps/core.xml", corePropsXml()],
       ["docProps/app.xml", appPropsXml()]
     ];
 
-    return new Blob([createZip(files)], {
-      type: "application/vnd.ms-excel.sheet.macroEnabled.12"
-    });
+    return {
+      blob: new Blob([createZip(files)], {
+        type: "application/vnd.ms-excel.sheet.macroEnabled.12"
+      }),
+      macroProject
+    };
   }
 
   async function renderPlanToPng() {
@@ -706,11 +760,439 @@
   }
 
   async function loadVbaProject() {
+    const installedProject = loadInstalledVbaProject();
+    if (installedProject) {
+      if (!(await isPlaceholderVbaProject(installedProject.bytes))) {
+        return {
+          bytes: installedProject.bytes,
+          live: true,
+          sourceName: installedProject.sourceName,
+          statusText: "Live macro installed"
+        };
+      }
+      localStorage.removeItem(VBA_PROJECT_STORAGE_KEY);
+      renderMacroStatus();
+    }
+
     const response = await fetch(EXCEL_VBA_PROJECT_SRC);
     if (!response.ok) {
       throw new Error("The macro template is missing. Upload vendor/excel/vbaProject.bin with the site.");
     }
-    return new Uint8Array(await response.arrayBuffer());
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const isPlaceholder = await isPlaceholderVbaProject(bytes);
+    if (isPlaceholder) {
+      const exportSnapshot = window.confirm(
+        "The Excel live-update macro template has not been installed yet. The workbook will export as a snapshot, but changing Progress column D or E in Excel will not recolour boxes or refresh labels. Export the snapshot anyway?"
+      );
+      if (!exportSnapshot) {
+        throw new Error("Excel live-update macro template is not installed yet. See vendor/excel/README.md for the one-time setup.");
+      }
+    }
+
+    return {
+      bytes,
+      live: !isPlaceholder,
+      sourceName: isPlaceholder ? "placeholder sample macro" : "site macro template",
+      statusText: isPlaceholder ? "Snapshot only" : "Live macro bundled"
+    };
+  }
+
+  function saveInstalledVbaProject(bytes, sourceName) {
+    const payload = {
+      sourceName,
+      installedAt: new Date().toISOString(),
+      bytes: bytesToBase64(bytes)
+    };
+    localStorage.setItem(VBA_PROJECT_STORAGE_KEY, JSON.stringify(payload));
+  }
+
+  function loadInstalledVbaProject() {
+    const raw = localStorage.getItem(VBA_PROJECT_STORAGE_KEY);
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.bytes !== "string") return null;
+      return {
+        sourceName: typeof parsed.sourceName === "string" ? parsed.sourceName : "local template",
+        bytes: base64ToBytes(parsed.bytes)
+      };
+    } catch (error) {
+      console.warn("Could not read the installed Excel macro template", error);
+      localStorage.removeItem(VBA_PROJECT_STORAGE_KEY);
+      return null;
+    }
+  }
+
+  function loadInstalledVbaMetadata() {
+    const raw = localStorage.getItem(VBA_PROJECT_STORAGE_KEY);
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.bytes !== "string") return null;
+      return {
+        sourceName: typeof parsed.sourceName === "string" ? parsed.sourceName : "local template",
+        installedAt: typeof parsed.installedAt === "string" ? parsed.installedAt : ""
+      };
+    } catch (error) {
+      console.warn("Could not read the installed Excel macro template metadata", error);
+      localStorage.removeItem(VBA_PROJECT_STORAGE_KEY);
+      return null;
+    }
+  }
+
+  function renderMacroStatus() {
+    const metadata = loadInstalledVbaMetadata();
+    const isInstalled = Boolean(metadata);
+    const sourceName = metadata ? metadata.sourceName : "no local macro template";
+
+    el.macroStatus.textContent = isInstalled ? "Live XLSM" : "Snapshot XLSM";
+    el.macroStatus.title = isInstalled
+      ? `Exports use the locally installed macro template: ${sourceName}`
+      : "Exports are snapshots until a macro template is installed.";
+    el.macroStatus.dataset.state = isInstalled ? "live" : "snapshot";
+    el.clearMacroButton.hidden = !isInstalled;
+    el.exportExcelButton.title = isInstalled
+      ? "Download a live macro-enabled Excel workbook"
+      : "Download a snapshot XLSM, or install a macro template for live Excel updates";
+  }
+
+  async function isPlaceholderVbaProject(bytes) {
+    if (bytes.length !== PLACEHOLDER_VBA_PROJECT_BYTES) return false;
+    if (!window.crypto || !window.crypto.subtle) return true;
+
+    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return hash === PLACEHOLDER_VBA_PROJECT_SHA256;
+  }
+
+  async function extractVbaProjectFromWorkbook(workbookBytes) {
+    const entry = findZipEntry(workbookBytes, "xl/vbaProject.bin");
+    if (!entry) {
+      throw new Error("That workbook does not contain xl/vbaProject.bin. Save the template as a macro-enabled .xlsm file first.");
+    }
+
+    const compressed = workbookBytes.slice(entry.dataOffset, entry.dataOffset + entry.compressedSize);
+    let data;
+    if (entry.compressionMethod === 0) {
+      data = compressed;
+    } else if (entry.compressionMethod === 8) {
+      data = await inflateZipEntry(compressed);
+    } else {
+      throw new Error(`That workbook uses ZIP compression method ${entry.compressionMethod}, which this local page cannot read.`);
+    }
+
+    if (entry.uncompressedSize && data.length !== entry.uncompressedSize) {
+      throw new Error("The extracted VBA project size did not match the workbook directory.");
+    }
+    if (data.length < 1024) {
+      throw new Error("The extracted VBA project is unexpectedly small. The template may not contain a compiled macro project.");
+    }
+
+    return data;
+  }
+
+  function findZipEntry(bytes, requestedName) {
+    const eocdOffset = findEndOfCentralDirectory(bytes);
+    if (eocdOffset < 0) {
+      throw new Error("That file is not a readable Excel .xlsm package.");
+    }
+
+    const entryCount = readUint16(bytes, eocdOffset + 10);
+    const centralDirectoryOffset = readUint32(bytes, eocdOffset + 16);
+    let offset = centralDirectoryOffset;
+    const target = requestedName.toLowerCase();
+    const decoder = new TextDecoder("utf-8");
+
+    for (let index = 0; index < entryCount; index += 1) {
+      if (readUint32(bytes, offset) !== 0x02014b50) break;
+
+      const compressionMethod = readUint16(bytes, offset + 10);
+      const compressedSize = readUint32(bytes, offset + 20);
+      const uncompressedSize = readUint32(bytes, offset + 24);
+      const nameLength = readUint16(bytes, offset + 28);
+      const extraLength = readUint16(bytes, offset + 30);
+      const commentLength = readUint16(bytes, offset + 32);
+      const localHeaderOffset = readUint32(bytes, offset + 42);
+      const name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+
+      if (name.toLowerCase() === target) {
+        if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localHeaderOffset === 0xffffffff) {
+          throw new Error("ZIP64 macro templates are not supported by the local installer.");
+        }
+        if (readUint32(bytes, localHeaderOffset) !== 0x04034b50) {
+          throw new Error("The macro template has an invalid ZIP local header.");
+        }
+
+        const localNameLength = readUint16(bytes, localHeaderOffset + 26);
+        const localExtraLength = readUint16(bytes, localHeaderOffset + 28);
+        return {
+          compressionMethod,
+          compressedSize,
+          uncompressedSize,
+          dataOffset: localHeaderOffset + 30 + localNameLength + localExtraLength
+        };
+      }
+
+      offset += 46 + nameLength + extraLength + commentLength;
+    }
+
+    return null;
+  }
+
+  function findEndOfCentralDirectory(bytes) {
+    const minOffset = Math.max(0, bytes.length - 22 - 65535);
+    for (let offset = bytes.length - 22; offset >= minOffset; offset -= 1) {
+      if (readUint32(bytes, offset) === 0x06054b50) return offset;
+    }
+    return -1;
+  }
+
+  async function inflateZipEntry(bytes) {
+    if (typeof DecompressionStream !== "undefined") {
+      const formats = ["deflate-raw", "deflate"];
+      for (const format of formats) {
+        try {
+          const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
+          return new Uint8Array(await new Response(stream).arrayBuffer());
+        } catch (error) {
+          console.warn(`Browser ${format} decompression failed; using the local fallback.`, error);
+        }
+      }
+    }
+
+    return inflateRawDeflate(bytes);
+  }
+
+  function inflateRawDeflate(bytes) {
+    const reader = createBitReader(bytes);
+    const output = [];
+    let isFinal = false;
+
+    while (!isFinal) {
+      isFinal = reader.readBits(1) === 1;
+      const blockType = reader.readBits(2);
+
+      if (blockType === 0) {
+        inflateStoredBlock(reader, output);
+      } else if (blockType === 1) {
+        inflateCompressedBlock(reader, output, fixedLiteralTree(), fixedDistanceTree());
+      } else if (blockType === 2) {
+        const trees = readDynamicTrees(reader);
+        inflateCompressedBlock(reader, output, trees.literalTree, trees.distanceTree);
+      } else {
+        throw new Error("The macro template contains an invalid deflate block.");
+      }
+    }
+
+    return new Uint8Array(output);
+  }
+
+  function createBitReader(bytes) {
+    let position = 0;
+    let bitBuffer = 0;
+    let bitCount = 0;
+
+    return {
+      readBits(count) {
+        while (bitCount < count) {
+          if (position >= bytes.length) throw new Error("Unexpected end of deflate data.");
+          bitBuffer |= bytes[position] << bitCount;
+          position += 1;
+          bitCount += 8;
+        }
+
+        const value = bitBuffer & ((1 << count) - 1);
+        bitBuffer >>>= count;
+        bitCount -= count;
+        return value;
+      },
+      alignByte() {
+        bitBuffer = 0;
+        bitCount = 0;
+      },
+      readByte() {
+        if (position >= bytes.length) throw new Error("Unexpected end of stored deflate block.");
+        return bytes[position++];
+      }
+    };
+  }
+
+  function inflateStoredBlock(reader, output) {
+    reader.alignByte();
+    const length = reader.readByte() | (reader.readByte() << 8);
+    const inverseLength = reader.readByte() | (reader.readByte() << 8);
+    if (((length ^ inverseLength) & 0xffff) !== 0xffff) {
+      throw new Error("The macro template contains an invalid stored deflate block.");
+    }
+
+    for (let index = 0; index < length; index += 1) {
+      output.push(reader.readByte());
+    }
+  }
+
+  function inflateCompressedBlock(reader, output, literalTree, distanceTree) {
+    while (true) {
+      const symbol = decodeHuffmanSymbol(reader, literalTree);
+      if (symbol < 256) {
+        output.push(symbol);
+      } else if (symbol === 256) {
+        return;
+      } else if (symbol <= 285) {
+        const lengthIndex = symbol - 257;
+        let length = DEFLATE_LENGTH_BASE[lengthIndex];
+        length += reader.readBits(DEFLATE_LENGTH_EXTRA[lengthIndex]);
+
+        const distanceSymbol = decodeHuffmanSymbol(reader, distanceTree);
+        if (distanceSymbol >= DEFLATE_DISTANCE_BASE.length) {
+          throw new Error("The macro template contains an invalid deflate distance.");
+        }
+
+        let distance = DEFLATE_DISTANCE_BASE[distanceSymbol];
+        distance += reader.readBits(DEFLATE_DISTANCE_EXTRA[distanceSymbol]);
+        if (distance > output.length) {
+          throw new Error("The macro template references data before the start of the deflate output.");
+        }
+
+        for (let index = 0; index < length; index += 1) {
+          output.push(output[output.length - distance]);
+        }
+      } else {
+        throw new Error("The macro template contains an invalid deflate symbol.");
+      }
+    }
+  }
+
+  function readDynamicTrees(reader) {
+    const literalCount = reader.readBits(5) + 257;
+    const distanceCount = reader.readBits(5) + 1;
+    const codeLengthCount = reader.readBits(4) + 4;
+    const codeLengthOrder = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    const codeLengthLengths = new Array(19).fill(0);
+
+    for (let index = 0; index < codeLengthCount; index += 1) {
+      codeLengthLengths[codeLengthOrder[index]] = reader.readBits(3);
+    }
+
+    const codeLengthTree = buildHuffmanTree(codeLengthLengths);
+    const lengths = [];
+    while (lengths.length < literalCount + distanceCount) {
+      const symbol = decodeHuffmanSymbol(reader, codeLengthTree);
+      if (symbol <= 15) {
+        lengths.push(symbol);
+      } else if (symbol === 16) {
+        if (!lengths.length) throw new Error("The macro template has an invalid repeated deflate length.");
+        const repeat = reader.readBits(2) + 3;
+        const value = lengths[lengths.length - 1];
+        for (let index = 0; index < repeat; index += 1) lengths.push(value);
+      } else if (symbol === 17) {
+        const repeat = reader.readBits(3) + 3;
+        for (let index = 0; index < repeat; index += 1) lengths.push(0);
+      } else if (symbol === 18) {
+        const repeat = reader.readBits(7) + 11;
+        for (let index = 0; index < repeat; index += 1) lengths.push(0);
+      } else {
+        throw new Error("The macro template has an invalid deflate code-length symbol.");
+      }
+    }
+
+    return {
+      literalTree: buildHuffmanTree(lengths.slice(0, literalCount)),
+      distanceTree: buildHuffmanTree(lengths.slice(literalCount, literalCount + distanceCount))
+    };
+  }
+
+  let cachedFixedLiteralTree = null;
+  let cachedFixedDistanceTree = null;
+
+  function fixedLiteralTree() {
+    if (!cachedFixedLiteralTree) {
+      const lengths = new Array(288).fill(0);
+      for (let symbol = 0; symbol <= 143; symbol += 1) lengths[symbol] = 8;
+      for (let symbol = 144; symbol <= 255; symbol += 1) lengths[symbol] = 9;
+      for (let symbol = 256; symbol <= 279; symbol += 1) lengths[symbol] = 7;
+      for (let symbol = 280; symbol <= 287; symbol += 1) lengths[symbol] = 8;
+      cachedFixedLiteralTree = buildHuffmanTree(lengths);
+    }
+    return cachedFixedLiteralTree;
+  }
+
+  function fixedDistanceTree() {
+    if (!cachedFixedDistanceTree) {
+      cachedFixedDistanceTree = buildHuffmanTree(new Array(32).fill(5));
+    }
+    return cachedFixedDistanceTree;
+  }
+
+  function buildHuffmanTree(lengths) {
+    const maxBits = Math.max(...lengths);
+    const counts = new Array(maxBits + 1).fill(0);
+    const nextCodes = new Array(maxBits + 1).fill(0);
+    const tables = Array.from({ length: maxBits + 1 }, () => new Map());
+    let code = 0;
+
+    for (const length of lengths) {
+      if (length > 0) counts[length] += 1;
+    }
+
+    for (let bits = 1; bits <= maxBits; bits += 1) {
+      code = (code + (counts[bits - 1] || 0)) << 1;
+      nextCodes[bits] = code;
+    }
+
+    lengths.forEach((length, symbol) => {
+      if (!length) return;
+      const symbolCode = nextCodes[length];
+      nextCodes[length] += 1;
+      tables[length].set(reverseBits(symbolCode, length), symbol);
+    });
+
+    return { maxBits, tables };
+  }
+
+  function reverseBits(value, length) {
+    let reversed = 0;
+    for (let index = 0; index < length; index += 1) {
+      reversed = (reversed << 1) | (value & 1);
+      value >>>= 1;
+    }
+    return reversed;
+  }
+
+  function decodeHuffmanSymbol(reader, tree) {
+    let code = 0;
+    for (let length = 1; length <= tree.maxBits; length += 1) {
+      code |= reader.readBits(1) << (length - 1);
+      if (tree.tables[length].has(code)) return tree.tables[length].get(code);
+    }
+    throw new Error("The macro template contains an invalid deflate code.");
+  }
+
+  function readUint16(bytes, offset) {
+    return bytes[offset] | (bytes[offset + 1] << 8);
+  }
+
+  function readUint32(bytes, offset) {
+    return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function base64ToBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
   }
 
   function contentTypesXml() {
@@ -788,7 +1270,11 @@
     </styleSheet>`);
   }
 
-  function planSheetXml() {
+  function planSheetXml(macroProject) {
+    const statusMessage = macroProject.live
+      ? "Live macro included. Enable macros in Excel, then edits on the Progress sheet update zone colours and labels."
+      : "Snapshot export. Install the macro template before exporting if this workbook must update zone colours and labels in Excel.";
+
     return xmlDecl(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
       <sheetPr codeName="Sheet1"/>
       <sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews>
@@ -799,7 +1285,7 @@
           ${cell("A1", "Floor Plan Progress Export", "inlineStr", 2)}
         </row>
         <row r="2">
-          ${cell("A2", "Edit room percentages on the Progress sheet. Zone drawing shapes are preserved on this plan sheet.", "inlineStr", 0)}
+          ${cell("A2", statusMessage, "inlineStr", 0)}
         </row>
       </sheetData>
       <pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0.1" footer="0.1"/>
@@ -813,9 +1299,13 @@
     </Relationships>`);
   }
 
-  function progressSheetXml(rooms) {
+  function progressSheetXml(rooms, macroProject) {
+    const refreshStatus = macroProject.live ? "Live macro included" : "Snapshot only";
+    const refreshNote = macroProject.live
+      ? "Enable macros, then edit D or E."
+      : "Install macro template and export again for live updates.";
     const rows = [
-      `<row r="1">${cell("A1", "Room ID", "inlineStr", 1)}${cell("B1", "Zone Shape", "inlineStr", 1)}${cell("C1", "Current Colour", "inlineStr", 1)}${cell("D1", "Percent Complete", "inlineStr", 1)}${cell("E1", "Overlay Opacity", "inlineStr", 1)}${cell("F1", "Points", "inlineStr", 1)}${cell("G1", "Label Shape", "inlineStr", 1)}</row>`
+      `<row r="1">${cell("A1", "Room ID", "inlineStr", 1)}${cell("B1", "Zone Shape", "inlineStr", 1)}${cell("C1", "Current Colour", "inlineStr", 1)}${cell("D1", "Percent Complete", "inlineStr", 1)}${cell("E1", "Overlay Opacity", "inlineStr", 1)}${cell("F1", "Points", "inlineStr", 1)}${cell("G1", "Label Shape", "inlineStr", 1)}${cell("H1", "Excel Refresh", "inlineStr", 1)}${cell("I1", "Macro Source", "inlineStr", 1)}${cell("J1", "Note", "inlineStr", 1)}</row>`
     ];
 
     rooms.forEach((room, index) => {
@@ -828,8 +1318,19 @@
         ${cell(`E${row}`, state.settings.opacity, "n", 4)}
         ${cell(`F${row}`, JSON.stringify(room.points), "inlineStr", 4)}
         ${cell(`G${row}`, excelLabelShapeName(room), "inlineStr", 4)}
+        ${index === 0 ? cell(`H${row}`, refreshStatus, "inlineStr", 4) : ""}
+        ${index === 0 ? cell(`I${row}`, macroProject.sourceName, "inlineStr", 4) : ""}
+        ${index === 0 ? cell(`J${row}`, refreshNote, "inlineStr", 4) : ""}
       </row>`);
     });
+
+    if (!rooms.length) {
+      rows.push(`<row r="2">
+        ${cell("H2", refreshStatus, "inlineStr", 4)}
+        ${cell("I2", macroProject.sourceName, "inlineStr", 4)}
+        ${cell("J2", refreshNote, "inlineStr", 4)}
+      </row>`);
+    }
 
     return xmlDecl(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
       <sheetPr codeName="Sheet2"/>
@@ -843,6 +1344,9 @@
         <col min="5" max="5" width="16" customWidth="1"/>
         <col min="6" max="6" width="80" customWidth="1"/>
         <col min="7" max="7" width="26" customWidth="1"/>
+        <col min="8" max="8" width="22" customWidth="1"/>
+        <col min="9" max="9" width="26" customWidth="1"/>
+        <col min="10" max="10" width="44" customWidth="1"/>
       </cols>
       <sheetData>${rows.join("")}</sheetData>
       <autoFilter ref="A1:G${Math.max(1, rooms.length + 1)}"/>
@@ -1437,11 +1941,13 @@
     const text = String(value || "").trim();
     if (!text) return [];
 
-    try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed;
-    } catch (error) {
-      console.warn("CSV points were not JSON.", error);
+    if (/^[\[{]/.test(text)) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (error) {
+        console.warn("CSV points looked like JSON but could not be parsed.", error);
+      }
     }
 
     return text

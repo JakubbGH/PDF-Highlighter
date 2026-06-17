@@ -1,5 +1,24 @@
 Option Explicit
 
+Private Sub Workbook_Open()
+    On Error Resume Next
+    RefreshZoneColours
+    On Error GoTo 0
+End Sub
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+    If TypeName(Sh) <> "Worksheet" Then Exit Sub
+    If Sh.Name <> "Progress" Then Exit Sub
+    If Intersect(Target, Sh.Range("D:E")) Is Nothing Then Exit Sub
+
+    On Error GoTo CleanExit
+    Application.EnableEvents = False
+    RefreshZoneColours
+
+CleanExit:
+    Application.EnableEvents = True
+End Sub
+
 Public Sub RefreshZoneColours()
     Dim progressSheet As Worksheet
     Dim planSheet As Worksheet

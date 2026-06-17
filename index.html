@@ -42,6 +42,15 @@
             <span aria-hidden="true">X</span>
             Export XLSM
           </button>
+          <button class="button" id="installMacroButton" type="button" title="Install a local Excel macro template">
+            <span aria-hidden="true">M</span>
+            Install Macro
+          </button>
+          <button class="button" id="clearMacroButton" type="button" title="Remove the locally installed Excel macro template" hidden>
+            <span aria-hidden="true">-</span>
+            Clear Macro
+          </button>
+          <span class="macro-status" id="macroStatus" aria-live="polite">Snapshot XLSM</span>
         </div>
       </header>
 
@@ -161,8 +170,9 @@
     <input id="planFileInput" type="file" accept="application/pdf,.pdf,image/png,image/jpeg,image/webp,image/svg+xml" hidden>
     <input id="projectFileInput" type="file" accept="application/json,.json" hidden>
     <input id="csvFileInput" type="file" accept=".csv,text/csv" hidden>
+    <input id="macroTemplateInput" type="file" accept=".xlsm,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
 
     <script src="vendor/pdf.min.js?v=1"></script>
-    <script src="app.js?v=8"></script>
+    <script src="app.js?v=12"></script>
   </body>
 </html>
