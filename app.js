@@ -746,6 +746,7 @@
         <sheet name="Plan" sheetId="1" r:id="rId1"/>
         <sheet name="Progress" sheetId="2" r:id="rId2"/>
       </sheets>
+      <calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>
     </workbook>`);
   }
 
@@ -814,18 +815,19 @@
 
   function progressSheetXml(rooms) {
     const rows = [
-      `<row r="1">${cell("A1", "Room ID", "inlineStr", 1)}${cell("B1", "Percent", "inlineStr", 1)}${cell("C1", "Current Colour", "inlineStr", 1)}${cell("D1", "Overlay Opacity", "inlineStr", 1)}${cell("E1", "Zone Shape", "inlineStr", 1)}${cell("F1", "Points", "inlineStr", 1)}</row>`
+      `<row r="1">${cell("A1", "Room ID", "inlineStr", 1)}${cell("B1", "Zone Shape", "inlineStr", 1)}${cell("C1", "Current Colour", "inlineStr", 1)}${cell("D1", "Percent Complete", "inlineStr", 1)}${cell("E1", "Overlay Opacity", "inlineStr", 1)}${cell("F1", "Points", "inlineStr", 1)}${cell("G1", "Label Shape", "inlineStr", 1)}</row>`
     ];
 
     rooms.forEach((room, index) => {
       const row = index + 2;
       rows.push(`<row r="${row}">
         ${cell(`A${row}`, room.id, "inlineStr", 4)}
-        ${cell(`B${row}`, room.percent, "n", 4)}
-        ${cell(`C${row}`, rgbToHex(progressColor(room.percent)), "inlineStr", 4)}
-        ${cell(`D${row}`, `${state.settings.opacity}%`, "inlineStr", 4)}
-        ${cell(`E${row}`, excelShapeName(room), "inlineStr", 4)}
+        ${cell(`B${row}`, excelShapeName(room), "inlineStr", 4)}
+        ${formulaTextCell(`C${row}`, excelColourFormula(row), rgbToHex(progressColor(room.percent)), 4)}
+        ${cell(`D${row}`, room.percent, "n", 4)}
+        ${cell(`E${row}`, state.settings.opacity, "n", 4)}
         ${cell(`F${row}`, JSON.stringify(room.points), "inlineStr", 4)}
+        ${cell(`G${row}`, excelLabelShapeName(room), "inlineStr", 4)}
       </row>`);
     });
 
@@ -835,29 +837,38 @@
       <sheetFormatPr defaultRowHeight="18"/>
       <cols>
         <col min="1" max="1" width="18" customWidth="1"/>
-        <col min="2" max="2" width="12" customWidth="1"/>
+        <col min="2" max="2" width="26" customWidth="1"/>
         <col min="3" max="3" width="16" customWidth="1"/>
-        <col min="4" max="4" width="16" customWidth="1"/>
-        <col min="5" max="5" width="26" customWidth="1"/>
+        <col min="4" max="4" width="18" customWidth="1"/>
+        <col min="5" max="5" width="16" customWidth="1"/>
         <col min="6" max="6" width="80" customWidth="1"/>
+        <col min="7" max="7" width="26" customWidth="1"/>
       </cols>
       <sheetData>${rows.join("")}</sheetData>
-      <autoFilter ref="A1:F${Math.max(1, rooms.length + 1)}"/>
+      <autoFilter ref="A1:G${Math.max(1, rooms.length + 1)}"/>
+      <dataValidations count="2">
+        <dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" sqref="D2:D${Math.max(2, rooms.length + 1)}"><formula1>0</formula1><formula2>100</formula2></dataValidation>
+        <dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" sqref="E2:E${Math.max(2, rooms.length + 1)}"><formula1>0</formula1><formula2>100</formula2></dataValidation>
+      </dataValidations>
       <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
     </worksheet>`);
   }
 
   function drawingXml(rooms, imageWidth, imageHeight) {
     const imageExtent = { width: imageWidth, height: imageHeight };
+    const mappedRooms = rooms.filter((room) => room.points.length >= 3);
     const image = absoluteAnchor(0, EXCEL_PLAN_TOP_OFFSET, imageExtent.width, imageExtent.height, pictureXml(2, "Floor plan image", "rId1", imageExtent.width, imageExtent.height));
-    const shapes = rooms
-      .filter((room) => room.points.length >= 3)
+    const shapes = mappedRooms
       .map((room, index) => polygonShapeAnchor(room, index + 3))
+      .join("");
+    const labels = mappedRooms
+      .map((room, index) => roomLabelAnchor(room, index + 3 + mappedRooms.length))
       .join("");
 
     return xmlDecl(`<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
       ${image}
       ${shapes}
+      ${labels}
     </xdr:wsDr>`);
   }
 
@@ -890,8 +901,6 @@
     const height = Math.max(1, bounds.maxY - bounds.minY);
     const fill = rgbToHex(progressColor(room.percent)).replace("#", "");
     const alpha = Math.round(clamp(state.settings.opacity, 0, 100) * 1000);
-    const percentFont = Math.round(clamp(Math.min(width / 4.8, height / 3.2), 8, 17) * 100);
-    const idFont = Math.round(clamp(percentFont * 0.72, 700, 1300));
     const pathPoints = room.points.map((point) => [
       Math.round(((point[0] - bounds.minX) / width) * 100000),
       Math.round(((point[1] - bounds.minY) / height) * 100000)
@@ -923,16 +932,38 @@
         <a:solidFill><a:srgbClr val="${fill}"><a:alpha val="${alpha}"/></a:srgbClr></a:solidFill>
         <a:ln w="14288"><a:solidFill><a:srgbClr val="243140"/></a:solidFill></a:ln>
       </xdr:spPr>
+    </xdr:sp>`;
+
+    return absoluteAnchor(bounds.minX, EXCEL_PLAN_TOP_OFFSET + bounds.minY, width, height, shape);
+  }
+
+  function roomLabelAnchor(room, id) {
+    const bounds = pointBounds(room.points);
+    const width = Math.max(1, bounds.maxX - bounds.minX);
+    const height = Math.max(1, bounds.maxY - bounds.minY);
+    const percentFont = Math.round(clamp(Math.min(width / 4.2, height / 2.7), 9, 19) * 100);
+    const idFont = Math.round(clamp(percentFont * 0.72, 800, 1400));
+    const shape = `<xdr:sp macro="">
+      <xdr:nvSpPr>
+        <xdr:cNvPr id="${id}" name="${xmlEscape(excelLabelShapeName(room))}" descr="${xmlEscape(`${room.id} label`)}"/>
+        <xdr:cNvSpPr txBox="1"/>
+      </xdr:nvSpPr>
+      <xdr:spPr>
+        <a:xfrm><a:off x="0" y="0"/><a:ext cx="${pxToEmu(width)}" cy="${pxToEmu(height)}"/></a:xfrm>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        <a:noFill/>
+        <a:ln><a:noFill/></a:ln>
+      </xdr:spPr>
       <xdr:txBody>
         <a:bodyPr wrap="square" anchor="ctr" anchorCtr="1" lIns="0" tIns="0" rIns="0" bIns="0" vertOverflow="clip" horzOverflow="clip"><a:normAutofit/></a:bodyPr>
         <a:lstStyle/>
         <a:p>
           <a:pPr algn="ctr"/>
-          <a:r><a:rPr lang="en-US" sz="${percentFont}" b="1"><a:solidFill><a:srgbClr val="111A24"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(`${room.percent}%`)}</a:t></a:r>
+          <a:r><a:rPr lang="en-US" sz="${percentFont}" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(`${room.percent}%`)}</a:t></a:r>
         </a:p>
         <a:p>
           <a:pPr algn="ctr"/>
-          <a:r><a:rPr lang="en-US" sz="${idFont}" b="1"><a:solidFill><a:srgbClr val="111A24"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(room.id)}</a:t></a:r>
+          <a:r><a:rPr lang="en-US" sz="${idFont}" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(room.id)}</a:t></a:r>
         </a:p>
       </xdr:txBody>
     </xdr:sp>`;
@@ -1044,6 +1075,20 @@
     return `<c r="${ref}" t="inlineStr"${styleAttr}><is><t>${xmlEscape(value)}</t></is></c>`;
   }
 
+  function formulaTextCell(ref, formula, cachedValue, style) {
+    const styleAttr = style ? ` s="${style}"` : "";
+    return `<c r="${ref}" t="str"${styleAttr}><f>${xmlEscape(formula)}</f><v>${xmlEscape(cachedValue)}</v></c>`;
+  }
+
+  function excelColourFormula(row) {
+    const p = `MAX(0,MIN(100,D${row}))`;
+    const lowerAmount = `(${p}/50)`;
+    const upperAmount = `((${p}-50)/50)`;
+    const lower = `"#"&DEC2HEX(ROUND(216+(217-216)*${lowerAmount},0),2)&DEC2HEX(ROUND(66+(163-66)*${lowerAmount},0),2)&DEC2HEX(ROUND(47+(33-47)*${lowerAmount},0),2)`;
+    const upper = `"#"&DEC2HEX(ROUND(217+(8-217)*${upperAmount},0),2)&DEC2HEX(ROUND(163+(88-163)*${upperAmount},0),2)&DEC2HEX(ROUND(33+(43-33)*${upperAmount},0),2)`;
+    return `IF(${p}<=50,${lower},${upper})`;
+  }
+
   function xmlDecl(xml) {
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${xml.replace(/>\s+</g, "><").trim()}`;
   }
@@ -1067,6 +1112,10 @@
 
   function excelShapeName(room) {
     return `Zone_${room.id.replace(/[^A-Za-z0-9_]/g, "_")}`;
+  }
+
+  function excelLabelShapeName(room) {
+    return `Label_${room.id.replace(/[^A-Za-z0-9_]/g, "_")}`;
   }
 
   function rgbToHex(rgb) {
