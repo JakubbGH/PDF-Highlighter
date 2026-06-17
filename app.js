@@ -571,22 +571,45 @@
       const rows = parseCsv(String(reader.result));
       const updates = csvRowsToUpdates(rows);
       let applied = 0;
+      let created = 0;
+      let geometryUpdated = 0;
       const missing = [];
 
       for (const update of updates) {
         const room = state.rooms.find((item) => item.id.toLowerCase() === update.id.toLowerCase());
+        const points = scaleImportedPoints(update.points, update.planWidth, update.planHeight);
         if (!room) {
-          missing.push(update.id);
+          if (points.length >= 3) {
+            state.rooms.push({
+              id: uniqueRoomId(update.id),
+              percent: update.percent,
+              points
+            });
+            created += 1;
+            applied += 1;
+            geometryUpdated += 1;
+          } else {
+            missing.push(update.id);
+          }
           continue;
         }
         room.percent = update.percent;
+        if (points.length >= 3) {
+          room.points = points;
+          geometryUpdated += 1;
+        }
         applied += 1;
       }
 
       queueSave();
       render();
-      const suffix = missing.length ? ` ${missing.length} room code${missing.length === 1 ? "" : "s"} were not mapped yet.` : "";
-      alert(`Updated ${applied} room${applied === 1 ? "" : "s"}.${suffix}`);
+      const detail = [
+        `${applied} room${applied === 1 ? "" : "s"} updated`,
+        created ? `${created} room${created === 1 ? "" : "s"} created` : "",
+        geometryUpdated ? `${geometryUpdated} overlay${geometryUpdated === 1 ? "" : "s"} mapped` : "",
+        missing.length ? `${missing.length} room code${missing.length === 1 ? "" : "s"} had no saved points` : ""
+      ].filter(Boolean).join(". ");
+      alert(`${detail}.`);
     };
     reader.readAsText(file);
   }
@@ -596,11 +619,17 @@
   }
 
   function downloadCsv() {
-    const rows = [["room_id", "percent"]];
+    const rows = [["room_id", "percent", "points", "plan_width", "plan_height"]];
     state.rooms
       .slice()
       .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
-      .forEach((room) => rows.push([room.id, String(room.percent)]));
+      .forEach((room) => rows.push([
+        room.id,
+        String(room.percent),
+        JSON.stringify(room.points),
+        String(state.plan.width),
+        String(state.plan.height)
+      ]));
     const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
     downloadFile(`${safeFileName(state.name)}-progress.csv`, csv, "text/csv");
   }
@@ -1330,14 +1359,71 @@
     const percentIndex = hasHeader
       ? firstExistingIndex(header, ["percent", "percentage", "%", "complete", "progress"])
       : 1;
+    const pointsIndex = hasHeader
+      ? optionalHeaderIndex(header, ["points", "polygon_points", "room_points", "points_json", "overlay_points"])
+      : -1;
+    const planWidthIndex = hasHeader
+      ? optionalHeaderIndex(header, ["plan_width", "width", "source_width", "drawing_width"])
+      : -1;
+    const planHeightIndex = hasHeader
+      ? optionalHeaderIndex(header, ["plan_height", "height", "source_height", "drawing_height"])
+      : -1;
     const dataRows = hasHeader ? rows.slice(1) : rows;
 
     return dataRows
       .map((row) => ({
         id: String(row[roomIndex] || "").trim(),
-        percent: clamp(Number(String(row[percentIndex] || "").replace("%", "").trim()) || 0, 0, 100)
+        percent: clamp(Number(String(row[percentIndex] || "").replace("%", "").trim()) || 0, 0, 100),
+        points: pointsIndex >= 0 ? parseCsvPoints(row[pointsIndex]) : [],
+        planWidth: planWidthIndex >= 0 ? Number(row[planWidthIndex]) : null,
+        planHeight: planHeightIndex >= 0 ? Number(row[planHeightIndex]) : null
       }))
       .filter((row) => row.id);
+  }
+
+  function optionalHeaderIndex(values, options) {
+    for (const option of options) {
+      const index = values.indexOf(option);
+      if (index >= 0) return index;
+    }
+    return -1;
+  }
+
+  function parseCsvPoints(value) {
+    const text = String(value || "").trim();
+    if (!text) return [];
+
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (error) {
+      console.warn("CSV points were not JSON.", error);
+    }
+
+    return text
+      .split(";")
+      .map((pair) => pair.trim().split(/[|\s:]+/).map(Number))
+      .filter((pair) => pair.length >= 2 && pair.every(Number.isFinite))
+      .map((pair) => [pair[0], pair[1]]);
+  }
+
+  function scaleImportedPoints(points, sourceWidth, sourceHeight) {
+    if (!Array.isArray(points)) return [];
+    const scaleX = sourceWidth && state.plan.width ? state.plan.width / sourceWidth : 1;
+    const scaleY = sourceHeight && state.plan.height ? state.plan.height / sourceHeight : 1;
+
+    return points
+      .map((point) => {
+        if (!Array.isArray(point) || point.length < 2) return null;
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return [
+          round(clamp(x * scaleX, 0, state.plan.width)),
+          round(clamp(y * scaleY, 0, state.plan.height))
+        ];
+      })
+      .filter(Boolean);
   }
 
   function firstExistingIndex(values, options) {
