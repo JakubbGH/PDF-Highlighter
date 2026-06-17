@@ -800,8 +800,8 @@
           ${cell("A2", "Edit room percentages on the Progress sheet. Zone drawing shapes are preserved on this plan sheet.", "inlineStr", 0)}
         </row>
       </sheetData>
-      <drawing r:id="rId1"/>
       <pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0.1" footer="0.1"/>
+      <drawing r:id="rId1"/>
     </worksheet>`);
   }
 
