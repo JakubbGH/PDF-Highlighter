@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Floor Plan Progress Tracker</title>
+    <link rel="stylesheet" href="styles.css?v=2">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">FP</span>
+          <div>
+            <h1>Floor Plan Progress Tracker</h1>
+            <p id="projectName">Sample Level 01</p>
+          </div>
+        </div>
+
+        <div class="toolbar" aria-label="Project actions">
+          <button class="button" id="loadPlanButton" type="button" title="Load a floor plan image or PDF">
+            <span aria-hidden="true">+</span>
+            Plan
+          </button>
+          <button class="button" id="loadProjectButton" type="button" title="Open a saved project JSON file">
+            <span aria-hidden="true">^</span>
+            Open
+          </button>
+          <button class="button" id="saveProjectButton" type="button" title="Download this project as JSON">
+            <span aria-hidden="true">v</span>
+            Save
+          </button>
+          <button class="button" id="importCsvButton" type="button" title="Import room percentages from CSV">
+            <span aria-hidden="true">%</span>
+            Import CSV
+          </button>
+          <button class="button" id="exportCsvButton" type="button" title="Download room percentages as CSV">
+            <span aria-hidden="true">#</span>
+            Export CSV
+          </button>
+          <button class="button" id="exportExcelButton" type="button" title="Download a macro-enabled Excel workbook">
+            <span aria-hidden="true">X</span>
+            Export XLSM
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="side-panel" aria-label="Room controls">
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Tools</h2>
+              <span id="saveStatus">Autosaved</span>
+            </div>
+
+            <div class="segmented" role="group" aria-label="Drawing mode">
+              <button class="segment is-active" id="selectModeButton" type="button">Select</button>
+              <button class="segment" id="drawModeButton" type="button">Draw Room</button>
+            </div>
+
+            <div class="draw-card" id="drawCard" hidden>
+              <label for="draftRoomId">Room ID</label>
+              <input id="draftRoomId" type="text" placeholder="A101" autocomplete="off">
+
+              <label for="draftPercent">Percent complete</label>
+              <input id="draftPercent" type="number" min="0" max="100" value="0">
+
+              <div class="button-row">
+                <button class="button primary" id="finishRoomButton" type="button" disabled>Finish</button>
+                <button class="button subtle" id="cancelDraftButton" type="button">Cancel</button>
+              </div>
+            </div>
+
+            <div class="hint" id="toolHint">
+              Select a room to edit it, or switch to Draw Room and click around a room boundary.
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Selected Room</h2>
+              <button class="icon-button danger" id="deleteRoomButton" type="button" title="Delete selected room" disabled>Del</button>
+            </div>
+
+            <div class="empty-state" id="noSelection">
+              No room selected.
+            </div>
+
+            <div class="edit-room" id="roomEditor" hidden>
+              <label for="selectedRoomId">Room ID</label>
+              <input id="selectedRoomId" type="text" autocomplete="off">
+
+              <div class="percent-row">
+                <label for="selectedPercent">Percent</label>
+                <output id="selectedPercentOutput">0%</output>
+              </div>
+              <input id="selectedPercent" type="range" min="0" max="100" value="0">
+              <input id="selectedPercentNumber" type="number" min="0" max="100" value="0">
+            </div>
+          </section>
+
+          <section class="panel-section room-list-section">
+            <div class="section-title">
+              <h2>Rooms</h2>
+              <span id="roomCount">0</span>
+            </div>
+            <input class="search" id="roomSearch" type="search" placeholder="Search room code">
+            <div class="room-list" id="roomList" role="list"></div>
+          </section>
+
+          <section class="panel-section compact">
+            <div class="section-title">
+              <h2>View</h2>
+            </div>
+            <label class="setting-line" for="zoomControl">
+              <span>Zoom</span>
+              <select id="zoomControl">
+                <option value="0.5">50%</option>
+                <option value="0.75">75%</option>
+                <option value="1" selected>100%</option>
+                <option value="1.25">125%</option>
+                <option value="1.5">150%</option>
+                <option value="2">200%</option>
+              </select>
+            </label>
+            <label class="setting-line" for="opacityControl">
+              <span>Overlay</span>
+              <input id="opacityControl" type="range" min="15" max="80" value="48">
+            </label>
+            <label class="check-line">
+              <input id="labelToggle" type="checkbox" checked>
+              <span>Show room labels</span>
+            </label>
+            <button class="button subtle full" id="resetSampleButton" type="button">Reload Sample</button>
+          </section>
+        </aside>
+
+        <section class="plan-area" aria-label="Floor plan">
+          <div class="plan-header">
+            <div>
+              <h2 id="planTitle">Sample Level 01</h2>
+              <p id="planMeta">6 rooms mapped</p>
+            </div>
+            <div class="legend" aria-label="Progress colour legend">
+              <span><i class="swatch low"></i>0%</span>
+              <span><i class="swatch mid"></i>50%</span>
+              <span><i class="swatch high"></i>100%</span>
+            </div>
+          </div>
+
+          <div class="stage-scroller" id="stageScroller">
+            <div class="stage" id="stage">
+              <img id="floorImage" alt="Floor plan background" draggable="false">
+              <svg id="overlay" aria-label="Room overlays"></svg>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <input id="planFileInput" type="file" accept="application/pdf,.pdf,image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+    <input id="projectFileInput" type="file" accept="application/json,.json" hidden>
+    <input id="csvFileInput" type="file" accept=".csv,text/csv" hidden>
+
+    <script src="vendor/pdf.min.js?v=1"></script>
+    <script src="app.js?v=3"></script>
+  </body>
+</html>

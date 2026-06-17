@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Sample office floor plan">
+  <rect width="1200" height="800" fill="#f7f8f8"/>
+  <rect x="48" y="48" width="1104" height="704" fill="#ffffff" stroke="#111827" stroke-width="7"/>
+  <path d="M48 368 H1152" stroke="#111827" stroke-width="6"/>
+  <path d="M48 432 H1152" stroke="#111827" stroke-width="6"/>
+  <path d="M368 48 V368" stroke="#111827" stroke-width="5"/>
+  <path d="M666 48 V368" stroke="#111827" stroke-width="5"/>
+  <path d="M368 432 V752" stroke="#111827" stroke-width="5"/>
+  <path d="M666 432 V752" stroke="#111827" stroke-width="5"/>
+  <path d="M368 368 V432" stroke="#ffffff" stroke-width="28"/>
+  <path d="M666 368 V432" stroke="#ffffff" stroke-width="28"/>
+  <path d="M556 368 V432" stroke="#ffffff" stroke-width="36"/>
+  <path d="M210 368 V432" stroke="#ffffff" stroke-width="36"/>
+  <path d="M894 368 V432" stroke="#ffffff" stroke-width="36"/>
+  <g stroke="#5d6878" stroke-width="2" fill="none">
+    <path d="M336 308 q-36 0 -36 36"/>
+    <path d="M402 308 q36 0 36 36"/>
+    <path d="M634 308 q-36 0 -36 36"/>
+    <path d="M700 308 q36 0 36 36"/>
+    <path d="M336 492 q-36 0 -36 -36"/>
+    <path d="M402 492 q36 0 36 -36"/>
+    <path d="M634 492 q-36 0 -36 -36"/>
+    <path d="M700 492 q36 0 36 -36"/>
+  </g>
+  <g fill="#111827" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">
+    <text x="214" y="166" font-size="34" font-weight="700">A101</text>
+    <text x="516" y="166" font-size="34" font-weight="700">A102</text>
+    <text x="898" y="166" font-size="34" font-weight="700">A103</text>
+    <text x="214" y="594" font-size="34" font-weight="700">B201</text>
+    <text x="516" y="594" font-size="34" font-weight="700">B202</text>
+    <text x="898" y="594" font-size="34" font-weight="700">B203</text>
+    <text x="600" y="410" font-size="28" font-weight="700" fill="#4a5565">CORRIDOR</text>
+  </g>
+  <g stroke="#c1cad4" stroke-width="1">
+    <path d="M96 112 h220 M96 214 h220 M424 112 h188 M424 214 h188 M724 112 h342 M724 214 h342"/>
+    <path d="M96 522 h220 M96 650 h220 M424 522 h188 M424 650 h188 M724 522 h342 M724 650 h342"/>
+  </g>
+</svg>
