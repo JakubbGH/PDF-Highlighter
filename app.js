@@ -5,6 +5,7 @@
   const PDF_WORKER_SRC = "vendor/pdf.worker.min.js";
   const PDF_RENDER_LONG_EDGE = 2400;
   const EXCEL_VBA_PROJECT_SRC = "vendor/excel/vbaProject.bin";
+  const EXCEL_PLAN_TOP_OFFSET = 84;
   const EMUS_PER_PIXEL = 9525;
   const PROGRESS_COLORS = {
     low: [216, 66, 47],
@@ -848,7 +849,7 @@
 
   function drawingXml(rooms, imageWidth, imageHeight) {
     const imageExtent = { width: imageWidth, height: imageHeight };
-    const image = oneCellAnchor(0, 0, 0, 4, imageExtent.width, imageExtent.height, pictureXml(2, "Floor plan image", "rId1", imageExtent.width, imageExtent.height));
+    const image = absoluteAnchor(0, EXCEL_PLAN_TOP_OFFSET, imageExtent.width, imageExtent.height, pictureXml(2, "Floor plan image", "rId1", imageExtent.width, imageExtent.height));
     const shapes = rooms
       .filter((room) => room.points.length >= 3)
       .map((room, index) => polygonShapeAnchor(room, index + 3))
@@ -889,9 +890,8 @@
     const height = Math.max(1, bounds.maxY - bounds.minY);
     const fill = rgbToHex(progressColor(room.percent)).replace("#", "");
     const alpha = Math.round(clamp(state.settings.opacity, 0, 100) * 1000);
-    const center = polygonCentroid(room.points);
-    const labelY = clamp(center[1] - bounds.minY - 16, 8, height - 8);
-    const idY = clamp(center[1] - bounds.minY + 8, 8, height - 8);
+    const percentFont = Math.round(clamp(Math.min(width / 4.8, height / 3.2), 8, 17) * 100);
+    const idFont = Math.round(clamp(percentFont * 0.72, 700, 1300));
     const pathPoints = room.points.map((point) => [
       Math.round(((point[0] - bounds.minX) / width) * 100000),
       Math.round(((point[1] - bounds.minY) / height) * 100000)
@@ -924,34 +924,29 @@
         <a:ln w="14288"><a:solidFill><a:srgbClr val="243140"/></a:solidFill></a:ln>
       </xdr:spPr>
       <xdr:txBody>
-        <a:bodyPr wrap="square" anchor="ctr"/>
+        <a:bodyPr wrap="square" anchor="ctr" anchorCtr="1" lIns="0" tIns="0" rIns="0" bIns="0" vertOverflow="clip" horzOverflow="clip"><a:normAutofit/></a:bodyPr>
         <a:lstStyle/>
         <a:p>
           <a:pPr algn="ctr"/>
-          <a:r><a:rPr lang="en-US" sz="1400" b="1"/><a:t>${xmlEscape(`${room.percent}%`)}</a:t></a:r>
+          <a:r><a:rPr lang="en-US" sz="${percentFont}" b="1"><a:solidFill><a:srgbClr val="111A24"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(`${room.percent}%`)}</a:t></a:r>
         </a:p>
         <a:p>
           <a:pPr algn="ctr"/>
-          <a:r><a:rPr lang="en-US" sz="1100" b="1"/><a:t>${xmlEscape(room.id)}</a:t></a:r>
+          <a:r><a:rPr lang="en-US" sz="${idFont}" b="1"><a:solidFill><a:srgbClr val="111A24"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(room.id)}</a:t></a:r>
         </a:p>
       </xdr:txBody>
     </xdr:sp>`;
 
-    return oneCellAnchor(bounds.minX, bounds.minY, 0, 4, width, height, shape);
+    return absoluteAnchor(bounds.minX, EXCEL_PLAN_TOP_OFFSET + bounds.minY, width, height, shape);
   }
 
-  function oneCellAnchor(x, y, col, row, width, height, body) {
-    return `<xdr:oneCellAnchor>
-      <xdr:from>
-        <xdr:col>${col}</xdr:col>
-        <xdr:colOff>${pxToEmu(x)}</xdr:colOff>
-        <xdr:row>${row}</xdr:row>
-        <xdr:rowOff>${pxToEmu(y)}</xdr:rowOff>
-      </xdr:from>
+  function absoluteAnchor(x, y, width, height, body) {
+    return `<xdr:absoluteAnchor>
+      <xdr:pos x="${pxToEmu(x)}" y="${pxToEmu(y)}"/>
       <xdr:ext cx="${pxToEmu(width)}" cy="${pxToEmu(height)}"/>
       ${body}
       <xdr:clientData/>
-    </xdr:oneCellAnchor>`;
+    </xdr:absoluteAnchor>`;
   }
 
   function corePropsXml() {
