@@ -61,6 +61,7 @@
     projectName: document.getElementById("projectName"),
     planTitle: document.getElementById("planTitle"),
     planMeta: document.getElementById("planMeta"),
+    renamePageButton: document.getElementById("renamePageButton"),
     pageTabs: document.getElementById("pageTabs"),
     floorImage: document.getElementById("floorImage"),
     overlay: document.getElementById("overlay"),
@@ -200,6 +201,7 @@
 
     el.loadPlanButton.addEventListener("click", () => el.planFileInput.click());
     el.planFileInput.addEventListener("change", handlePlanFile);
+    el.renamePageButton.addEventListener("click", renameActivePage);
     el.loadProjectButton.addEventListener("click", () => el.projectFileInput.click());
     el.projectFileInput.addEventListener("change", handleProjectFile);
     el.saveProjectButton.addEventListener("click", downloadProject);
@@ -281,6 +283,7 @@
         .filter(Boolean)
       : [];
     normalized.name = normalized.name || normalized.plan.name || `Page ${index + 1}`;
+    normalized.customName = Boolean(normalized.customName);
     normalized.rooms = Array.isArray(normalized.rooms) ? normalized.rooms : [];
     normalized.rooms.forEach((room, roomIndex) => {
       room.id = room.id || `ROOM-${roomIndex + 1}`;
@@ -356,6 +359,7 @@
     el.planTitle.textContent = state.plan.name || state.name;
     el.planMeta.textContent = `${roomTotal} room${roomTotal === 1 ? "" : "s"} mapped, ${avg}% average complete${pdfMeta}${multiPageMeta}`;
     el.roomCount.textContent = String(roomTotal);
+    el.renamePageButton.disabled = !state.pages.length;
   }
 
   function renderPageTabs() {
@@ -369,18 +373,43 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = `page-tab${index === state.activePageIndex ? " is-active" : ""}`;
-      button.textContent = pageTabLabel(page, index);
+      button.textContent = pageTabLabel(page, index, pages);
       button.title = page.name || page.plan.name || button.textContent;
       button.addEventListener("click", () => setActivePage(index));
       el.pageTabs.appendChild(button);
     });
   }
 
-  function pageTabLabel(page, index) {
+  function pageTabLabel(page, index, pages = state.pages || []) {
+    const label = basePageTabLabel(page, index, pages);
+    const sameLabelCount = pages.filter((item, itemIndex) => basePageTabLabel(item, itemIndex, pages) === label).length;
+    if (sameLabelCount <= 1) return label;
+    return `${label} ${index + 1}`;
+  }
+
+  function basePageTabLabel(page, index, pages = state.pages || []) {
+    if (page.customName && page.name) return page.name;
     if (page.plan.sourceType === "pdf") {
-      return `Page ${page.plan.pageNumber || index + 1}`;
+      const pageNumber = page.plan.pageNumber || index + 1;
+      const simpleLabel = `Page ${pageNumber}`;
+      const duplicatePageNumbers = pages.filter((item) => (
+        item.plan.sourceType === "pdf"
+        && (item.plan.pageNumber || 1) === pageNumber
+      )).length > 1;
+      if (duplicatePageNumbers) {
+        const sourceName = planSourceDisplayName(page);
+        return page.plan.pageCount > 1 ? `${sourceName} P${pageNumber}` : sourceName;
+      }
+      return simpleLabel;
     }
     return page.name || page.plan.name || `Page ${index + 1}`;
+  }
+
+  function planSourceDisplayName(page) {
+    return String(page?.plan?.originalFileName || page?.name || page?.plan?.name || "Plan")
+      .replace(/\.[^.]+$/, "")
+      .replace(/\s+-\s+Page\s+\d+$/i, "")
+      .trim() || "Plan";
   }
 
   function setActivePage(index) {
@@ -394,6 +423,28 @@
     draggingVertex = null;
     mode = "select";
     loadPlanImage(state.plan.src);
+    queueSave();
+    render();
+  }
+
+  function renameActivePage() {
+    const page = activePage();
+    if (!page) return;
+
+    const currentName = page.name || page.plan.name || `Page ${state.activePageIndex + 1}`;
+    const nextName = prompt("Rename this page:", currentName);
+    if (nextName === null) return;
+
+    const cleanedName = nextName.trim();
+    if (!cleanedName) {
+      alert("Page name cannot be blank.");
+      return;
+    }
+
+    page.name = cleanedName;
+    page.customName = true;
+    page.plan.name = cleanedName;
+    syncActivePageReferences();
     queueSave();
     render();
   }
@@ -1141,12 +1192,13 @@
   async function buildExcelWorkbook() {
     const macroProject = await loadVbaProject();
     const pageExports = [];
+    const planSheetNames = excelPlanSheetNames(state.pages);
     for (let index = 0; index < state.pages.length; index += 1) {
       const page = state.pages[index];
       const planImage = await renderPlanToPng(page.plan);
       pageExports.push({
         page,
-        sheetName: excelPlanSheetName(page, index, state.pages.length),
+        sheetName: planSheetNames[index],
         sheetIndex: index + 1,
         drawingIndex: index + 1,
         mediaName: `floor-plan-${index + 1}.png`,
@@ -2310,8 +2362,44 @@
     }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
   }
 
-  function excelPlanSheetName(_page, index, pageCount) {
-    return pageCount > 1 ? `Plan ${index + 1}` : "Plan";
+  function excelPlanSheetNames(pages = state.pages || []) {
+    const used = new Set(["progress"]);
+    return pages.map((page, index) => uniqueExcelSheetName(excelSheetBaseName(page, index), used));
+  }
+
+  function excelPlanSheetName(page, index, pages = state.pages || []) {
+    if (Array.isArray(pages)) {
+      return excelPlanSheetNames(pages)[index] || uniqueExcelSheetName(excelSheetBaseName(page, index), new Set(["progress"]));
+    }
+    return uniqueExcelSheetName(excelSheetBaseName(page, index), new Set(["progress"]));
+  }
+
+  function excelSheetBaseName(page, index) {
+    return page?.name || page?.plan?.name || planSourceDisplayName(page) || `Plan ${index + 1}`;
+  }
+
+  function uniqueExcelSheetName(value, used) {
+    const base = excelSafeSheetName(value, "Plan");
+    let candidate = base;
+    let suffix = 2;
+
+    while (used.has(candidate.toLowerCase())) {
+      const suffixText = ` ${suffix}`;
+      candidate = `${base.slice(0, 31 - suffixText.length).trim()}${suffixText}`;
+      suffix += 1;
+    }
+
+    used.add(candidate.toLowerCase());
+    return candidate;
+  }
+
+  function excelSafeSheetName(value, fallback) {
+    const cleaned = String(value || "")
+      .replace(/[:\\/?*[\]]/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/^'+|'+$/g, "")
+      .trim();
+    return (cleaned || fallback).slice(0, 31).trim() || fallback;
   }
 
   function excelShapeName(room) {
@@ -3018,7 +3106,7 @@
         const names = [
           page.name,
           page.plan.name,
-          excelPlanSheetName(page, index, state.pages.length),
+          excelPlanSheetName(page, index, state.pages),
           `page ${index + 1}`
         ].filter(Boolean).map((name) => String(name).toLowerCase());
         return names.includes(normalizedName);

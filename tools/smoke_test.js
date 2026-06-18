@@ -30,6 +30,8 @@ const TEST_EXPORTS = [
   "roomLabelBox",
   "planToPages",
   "projectNameFromFiles",
+  "pageTabLabel",
+  "excelPlanSheetNames",
   "copyVbaSourceCode",
   "fetchVbaSourceCode",
   "copyTextToClipboard",
@@ -333,6 +335,36 @@ async function run() {
     ["file-2-page-1", "file-2-page-2"],
     "multi-file PDFs should flatten into unique page ids"
   );
+  const twoSinglePagePdfs = [
+    {
+      name: "Ground Floor",
+      plan: { name: "Ground Floor", sourceType: "pdf", originalFileName: "Ground Floor.pdf", pageNumber: 1, pageCount: 1 }
+    },
+    {
+      name: "First Floor",
+      plan: { name: "First Floor", sourceType: "pdf", originalFileName: "First Floor.pdf", pageNumber: 1, pageCount: 1 }
+    }
+  ];
+  assert.deepEqual(
+    twoSinglePagePdfs.map((page, index) => api.pageTabLabel(page, index, twoSinglePagePdfs)),
+    ["Ground Floor", "First Floor"],
+    "separate single-page PDFs should use filename tab labels, not duplicate Page 1 labels"
+  );
+  assert.equal(
+    api.pageTabLabel({ customName: true, name: "Renamed Basement", plan: { sourceType: "pdf", pageNumber: 1, pageCount: 1 } }, 0, []),
+    "Renamed Basement",
+    "renamed pages should use the custom tab label"
+  );
+  assert.deepEqual(
+    api.excelPlanSheetNames([
+      { name: "Ground Floor", plan: {} },
+      { name: "First/Floor:East", plan: {} },
+      { name: "Progress", plan: {} },
+      { name: "Ground Floor", plan: {} }
+    ]),
+    ["Ground Floor", "First Floor East", "Progress 2", "Ground Floor 2"],
+    "Excel plan sheets should use unique safe page names"
+  );
 
   const zlRuns = [
     { text: "ZL", x: 80, y: 50, width: 14, height: 10, centerX: 87, centerY: 55 },
@@ -407,12 +439,14 @@ async function run() {
   const room = { id: "A101", percent: 25, points: [[72, 72], [357, 72], [357, 258], [72, 258]] };
   const livePlan = api.planSheetXml(liveMacro);
   const liveProgress = api.progressSheetXml([room], liveMacro);
+  const renamedProgress = api.progressSheetXml([{ room, sheetName: "Ground Floor", plan: {} }], liveMacro);
   const snapshotProgress = api.progressSheetXml([], snapshotMacro);
   const drawing = api.drawingXml([room], 1200, 800);
 
   assert.match(livePlan, /Live macro included/);
   assert.match(livePlan, /columns A, B, E, or F/);
   assert.match(liveProgress, /<c r="B2" t="inlineStr" s="4"><is><t>Plan<\/t><\/is><\/c>/, "progress row exports target plan sheet");
+  assert.match(renamedProgress, /<c r="B2" t="inlineStr" s="4"><is><t>Ground Floor<\/t><\/is><\/c>/, "renamed page sheet reference exports to Progress column B");
   assert.match(liveProgress, /<c r="E2" s="4"><v>25<\/v><\/c>/, "percent exports as numeric E cell");
   assert.match(liveProgress, /Live macro included/);
   assert.match(liveProgress, /edit A, B, E, or F/);

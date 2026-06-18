@@ -159,7 +159,10 @@
         <section class="plan-area" aria-label="Floor plan">
           <div class="plan-header">
             <div>
-              <h2 id="planTitle">Sample Level 01</h2>
+              <div class="plan-title-row">
+                <h2 id="planTitle">Sample Level 01</h2>
+                <button class="icon-button" id="renamePageButton" type="button" title="Rename this page">Rename</button>
+              </div>
               <p id="planMeta">6 rooms mapped</p>
             </div>
             <div class="legend" aria-label="Progress colour legend">
@@ -187,6 +190,6 @@
     <input id="macroTemplateInput" type="file" accept=".xlsm,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
 
     <script src="vendor/pdf.min.js?v=1"></script>
-    <script src="app.js?v=21"></script>
+    <script src="app.js?v=23"></script>
   </body>
 </html>

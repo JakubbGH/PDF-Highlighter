@@ -10,13 +10,14 @@ Open `index.html` in a browser. The app runs fully in the browser and autosaves 
 
 1. Click **Plans** and choose one or more PDF, PNG, JPG, WebP, or SVG floor plans.
    Multi-page PDFs and multiple selected PDFs are loaded into separate page tabs.
-2. Click **Draw Room**.
-3. Enter the room code, click around the room boundary, then click **Finish**.
-4. Select a room and adjust its percent complete.
-5. Use **Save** to download a project JSON backup.
-6. Use **Import CSV** to update percentages later.
-7. Use **Export XLSM** to download a macro-enabled Excel workbook with the floor plan, zone shapes, and editable room progress table.
-8. Use **Copy VBA** and **Install Macro** once if you want exports from this browser to include the live Excel refresh macro.
+2. Use **Rename** to name each page tab, such as `Ground Floor` or `Level 02`.
+3. Click **Draw Room**.
+4. Enter the room code, click around the room boundary, then click **Finish**.
+5. Select a room and adjust its percent complete.
+6. Use **Save** to download a project JSON backup.
+7. Use **Import CSV** to update percentages later.
+8. Use **Export XLSM** to download a macro-enabled Excel workbook with the floor plan, zone shapes, and editable room progress table.
+9. Use **Copy VBA** and **Install Macro** once if you want exports from this browser to include the live Excel refresh macro.
 
 For drawings with room IDs containing `ZL`, click **Auto ZL** after loading the plan. The app first reads any PDF text layer locally; if that finds nothing, it tries browser-native text detection on the rendered drawing image. It places pins on unmapped ZL labels and tries to create box-like room boundaries by scanning for straight wall lines around each label. Door gaps are tolerated, but browser image-text detection support varies, and the result should still be reviewed and adjusted where the drawing is broken or busy.
 
@@ -122,9 +123,9 @@ If Excel blocks VBA project access, enable **Trust access to the VBA project obj
 
 ## Notes
 
-- PDF plans are rendered in the browser. Multi-page PDFs become page tabs in the app and separate `Plan 1`, `Plan 2`, etc. sheets in Excel.
+- PDF plans are rendered in the browser. Multi-page PDFs become page tabs in the app; renamed page tabs become the plan worksheet names in Excel.
 - Room boundaries are traced once, then saved in the project JSON.
 - The original drawing remains visible under the semi-transparent progress overlay.
-- Excel export creates an `.xlsm` package with editable room data on the `Progress` sheet, zone drawing shapes on the plan sheet for each page, and separate white text labels layered over each zone. `Percent Complete` is exported as a numeric 0-100 value in column E.
+- Excel export creates an `.xlsm` package with editable room data on the `Progress` sheet, zone drawing shapes on the named plan sheet for each page, and separate white text labels layered over each zone. `Percent Complete` is exported as a numeric 0-100 value in column E. `Progress` column B stores the exact plan worksheet name used by the macro.
 - Live Excel-side recolouring needs a compiled VBA project. The browser can embed that file, but it cannot compile `.bas` source files itself. Use **Copy VBA** to prepare the Excel template, **Install Macro** to load it locally in the browser, or replace `vendor/excel/vbaProject.bin` once for every copy of the site. See `vendor/excel/README.md`.
 - Installed macro templates are stored only in your browser's local storage. Floor plans, PDFs, and templates are not uploaded by this static page.
