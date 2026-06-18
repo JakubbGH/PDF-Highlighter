@@ -10,6 +10,7 @@
   const PLACEHOLDER_VBA_PROJECT_SHA256 = "0ced1464b3677e98f5e3a8c5d80135e18dc98dca39299f1a8cfd2a00999fbf9f";
   const PLACEHOLDER_VBA_PROJECT_BYTES = 15872;
   const EXCEL_PLAN_TOP_OFFSET = 84;
+  const EXCEL_LABEL_BOX_PADDING = 4;
   const EMUS_PER_PIXEL = 9525;
   const AUTO_ZL_ROOM_PATTERN = /ZL/i;
   const AUTO_DETECT_WALL = {
@@ -60,6 +61,7 @@
     projectName: document.getElementById("projectName"),
     planTitle: document.getElementById("planTitle"),
     planMeta: document.getElementById("planMeta"),
+    pageTabs: document.getElementById("pageTabs"),
     floorImage: document.getElementById("floorImage"),
     overlay: document.getElementById("overlay"),
     stage: document.getElementById("stage"),
@@ -213,6 +215,7 @@
     el.resetSampleButton.addEventListener("click", () => {
       if (!confirm("Reload the sample project? Unsaved changes in this browser will be replaced.")) return;
       state = clone(SAMPLE_PROJECT);
+      normalizeProject(state);
       selectedRoomId = null;
       setMode("select");
       loadPlanImage(state.plan.src);
@@ -235,20 +238,84 @@
 
   function normalizeProject(project) {
     project.name = project.name || "Untitled Floor Plan";
-    project.plan = project.plan || clone(SAMPLE_PROJECT.plan);
-    project.plan.width = Number(project.plan.width) || 1200;
-    project.plan.height = Number(project.plan.height) || 800;
-    project.plan.sourceType = project.plan.sourceType || "image";
-    project.plan.zlLabels = Array.isArray(project.plan.zlLabels)
-      ? project.plan.zlLabels.map(normalizeDetectedZlLabel).filter(Boolean)
-      : [];
-    project.rooms = Array.isArray(project.rooms) ? project.rooms : [];
     project.settings = Object.assign({ opacity: 48, showLabels: true, zoom: 1 }, project.settings || {});
-    project.rooms.forEach((room, index) => {
-      room.id = room.id || `ROOM-${index + 1}`;
+    if (!Array.isArray(project.pages) || !project.pages.length) {
+      project.pages = [pageFromLegacyProject(project)];
+    }
+
+    project.pages = project.pages
+      .map((page, index) => normalizePage(page, index))
+      .filter(Boolean);
+
+    if (!project.pages.length) {
+      project.pages = [normalizePage(pageFromLegacyProject(clone(SAMPLE_PROJECT)), 0)];
+    }
+
+    project.activePageIndex = clamp(Math.floor(Number(project.activePageIndex) || 0), 0, project.pages.length - 1);
+    syncActivePageReferences(project);
+  }
+
+  function pageFromLegacyProject(project) {
+    const plan = project.plan || clone(SAMPLE_PROJECT.plan);
+    const name = plan.name || project.name || `Page 1`;
+    return {
+      id: "page-1",
+      name,
+      plan,
+      rooms: Array.isArray(project.rooms) ? project.rooms : []
+    };
+  }
+
+  function normalizePage(page, index) {
+    if (!page) return null;
+    const normalized = typeof page === "object" ? page : {};
+    normalized.id = normalized.id || `page-${index + 1}`;
+    normalized.plan = normalized.plan || clone(SAMPLE_PROJECT.plan);
+    normalized.plan.name = normalized.plan.name || normalized.name || `Page ${index + 1}`;
+    normalized.plan.width = Number(normalized.plan.width) || 1200;
+    normalized.plan.height = Number(normalized.plan.height) || 800;
+    normalized.plan.sourceType = normalized.plan.sourceType || "image";
+    normalized.plan.zlLabels = Array.isArray(normalized.plan.zlLabels)
+      ? normalized.plan.zlLabels
+        .map((label) => normalizeDetectedZlLabel(label, normalized.plan.width, normalized.plan.height))
+        .filter(Boolean)
+      : [];
+    normalized.name = normalized.name || normalized.plan.name || `Page ${index + 1}`;
+    normalized.rooms = Array.isArray(normalized.rooms) ? normalized.rooms : [];
+    normalized.rooms.forEach((room, roomIndex) => {
+      room.id = room.id || `ROOM-${roomIndex + 1}`;
       room.percent = clamp(Number(room.percent) || 0, 0, 100);
       room.points = Array.isArray(room.points) ? room.points : [];
+      room.points = room.points
+        .map((point) => {
+          if (!Array.isArray(point) || point.length < 2) return null;
+          const x = Number(point[0]);
+          const y = Number(point[1]);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+          return [
+            round(clamp(x, 0, normalized.plan.width)),
+            round(clamp(y, 0, normalized.plan.height))
+          ];
+        })
+        .filter(Boolean);
     });
+    return normalized;
+  }
+
+  function activePage(project = state) {
+    return project.pages[project.activePageIndex] || project.pages[0];
+  }
+
+  function syncActivePageReferences(project = state) {
+    const page = activePage(project);
+    project.plan = page.plan;
+    project.rooms = page.rooms;
+  }
+
+  function setCurrentRooms(rooms) {
+    const page = activePage();
+    page.rooms = rooms;
+    state.rooms = page.rooms;
   }
 
   function loadPlanImage(src) {
@@ -268,6 +335,7 @@
   function render() {
     normalizeProject(state);
     renderHeader();
+    renderPageTabs();
     renderStageSize();
     renderOverlay();
     renderRoomList();
@@ -278,13 +346,56 @@
   function renderHeader() {
     const roomTotal = state.rooms.length;
     const avg = roomTotal ? Math.round(state.rooms.reduce((sum, room) => sum + room.percent, 0) / roomTotal) : 0;
+    const pageCount = state.pages.length;
+    const pageNumber = state.activePageIndex + 1;
     const pdfMeta = state.plan.sourceType === "pdf"
-      ? `, PDF page ${state.plan.pageNumber || 1}${state.plan.pageCount ? ` of ${state.plan.pageCount}` : ""}`
+      ? `, PDF page ${state.plan.pageNumber || pageNumber}${state.plan.pageCount ? ` of ${state.plan.pageCount}` : ""}`
       : "";
+    const multiPageMeta = pageCount > 1 ? `, tab ${pageNumber} of ${pageCount}` : "";
     el.projectName.textContent = state.name;
     el.planTitle.textContent = state.plan.name || state.name;
-    el.planMeta.textContent = `${roomTotal} room${roomTotal === 1 ? "" : "s"} mapped, ${avg}% average complete${pdfMeta}`;
+    el.planMeta.textContent = `${roomTotal} room${roomTotal === 1 ? "" : "s"} mapped, ${avg}% average complete${pdfMeta}${multiPageMeta}`;
     el.roomCount.textContent = String(roomTotal);
+  }
+
+  function renderPageTabs() {
+    if (!el.pageTabs) return;
+    const pages = state.pages || [];
+    el.pageTabs.hidden = pages.length <= 1;
+    el.pageTabs.innerHTML = "";
+    if (pages.length <= 1) return;
+
+    pages.forEach((page, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `page-tab${index === state.activePageIndex ? " is-active" : ""}`;
+      button.textContent = pageTabLabel(page, index);
+      button.title = page.name || page.plan.name || button.textContent;
+      button.addEventListener("click", () => setActivePage(index));
+      el.pageTabs.appendChild(button);
+    });
+  }
+
+  function pageTabLabel(page, index) {
+    if (page.plan.sourceType === "pdf") {
+      return `Page ${page.plan.pageNumber || index + 1}`;
+    }
+    return page.name || page.plan.name || `Page ${index + 1}`;
+  }
+
+  function setActivePage(index) {
+    const nextIndex = clamp(Math.floor(Number(index) || 0), 0, state.pages.length - 1);
+    if (nextIndex === state.activePageIndex) return;
+
+    state.activePageIndex = nextIndex;
+    syncActivePageReferences();
+    selectedRoomId = null;
+    draftPoints = [];
+    draggingVertex = null;
+    mode = "select";
+    loadPlanImage(state.plan.src);
+    queueSave();
+    render();
   }
 
   function renderStageSize() {
@@ -580,7 +691,7 @@
     const room = getSelectedRoom();
     if (!room) return;
     if (!confirm(`Delete room ${room.id}?`)) return;
-    state.rooms = state.rooms.filter((item) => item.id !== room.id);
+    setCurrentRooms(state.rooms.filter((item) => item.id !== room.id));
     selectedRoomId = null;
     queueSave();
     render();
@@ -644,12 +755,14 @@
       const missing = [];
 
       for (const update of updates) {
-        const room = state.rooms.find((item) => item.id.toLowerCase() === update.id.toLowerCase());
-        const points = scaleImportedPoints(update.points, update.planWidth, update.planHeight);
+        const page = resolveCsvUpdatePage(update);
+        const rooms = page.rooms;
+        const room = rooms.find((item) => item.id.toLowerCase() === update.id.toLowerCase());
+        const points = scaleImportedPoints(update.points, update.planWidth, update.planHeight, page.plan);
         if (!room) {
           if (points.length >= 3) {
-            state.rooms.push({
-              id: uniqueRoomId(update.id),
+            rooms.push({
+              id: uniqueRoomId(update.id, null, rooms),
               percent: update.percent,
               points
             });
@@ -687,17 +800,21 @@
   }
 
   function downloadCsv() {
-    const rows = [["room_id", "percent", "points", "plan_width", "plan_height"]];
-    state.rooms
-      .slice()
-      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
-      .forEach((room) => rows.push([
-        room.id,
-        String(room.percent),
-        JSON.stringify(room.points),
-        String(state.plan.width),
-        String(state.plan.height)
-      ]));
+    const rows = [["page", "page_name", "room_id", "percent", "points", "plan_width", "plan_height"]];
+    state.pages.forEach((page, pageIndex) => {
+      page.rooms
+        .slice()
+        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+        .forEach((room) => rows.push([
+          String(pageIndex + 1),
+          page.name || page.plan.name || `Page ${pageIndex + 1}`,
+          room.id,
+          String(room.percent),
+          JSON.stringify(room.points),
+          String(page.plan.width),
+          String(page.plan.height)
+        ]));
+    });
     const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
     downloadFile(`${safeFileName(state.name)}-progress.csv`, csv, "text/csv");
   }
@@ -913,7 +1030,7 @@
     }
 
     const sourceCode = await response.text();
-    if (!/Workbook_SheetChange/.test(sourceCode) || !/RefreshZoneColours/.test(sourceCode) || !/A:A,D:E/.test(sourceCode)) {
+    if (!/Workbook_SheetChange/.test(sourceCode) || !/RefreshZoneColours/.test(sourceCode) || !/A:B,E:F/.test(sourceCode)) {
       throw new Error("The VBA source file does not look like the floor plan refresh macro.");
     }
     return sourceCode;
@@ -956,27 +1073,57 @@
   }
 
   async function buildExcelWorkbook() {
-    const planImage = await renderPlanToPng();
     const macroProject = await loadVbaProject();
-    const rooms = state.rooms
-      .slice()
-      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    const pageExports = [];
+    for (let index = 0; index < state.pages.length; index += 1) {
+      const page = state.pages[index];
+      const planImage = await renderPlanToPng(page.plan);
+      pageExports.push({
+        page,
+        sheetName: excelPlanSheetName(page, index, state.pages.length),
+        sheetIndex: index + 1,
+        drawingIndex: index + 1,
+        mediaName: `floor-plan-${index + 1}.png`,
+        image: planImage,
+        rooms: page.rooms
+          .slice()
+          .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      });
+    }
+
+    const progressSheetIndex = pageExports.length + 1;
+    const worksheetCount = progressSheetIndex;
+    const progressRows = pageExports.flatMap((pageExport) => (
+      pageExport.rooms.map((room) => ({
+        room,
+        sheetName: pageExport.sheetName,
+        plan: pageExport.page.plan
+      }))
+    ));
     const files = [
-      ["[Content_Types].xml", contentTypesXml()],
+      ["[Content_Types].xml", contentTypesXml(worksheetCount, pageExports.length)],
       ["_rels/.rels", rootRelsXml()],
-      ["xl/workbook.xml", workbookXml()],
-      ["xl/_rels/workbook.xml.rels", workbookRelsXml()],
-      ["xl/styles.xml", stylesXml()],
-      ["xl/worksheets/sheet1.xml", planSheetXml(macroProject)],
-      ["xl/worksheets/_rels/sheet1.xml.rels", planSheetRelsXml()],
-      ["xl/worksheets/sheet2.xml", progressSheetXml(rooms, macroProject)],
-      ["xl/drawings/drawing1.xml", drawingXml(rooms, planImage.width, planImage.height)],
-      ["xl/drawings/_rels/drawing1.xml.rels", drawingRelsXml()],
-      ["xl/media/floor-plan.png", planImage.bytes],
+      ["xl/workbook.xml", workbookXml(pageExports.map((pageExport) => pageExport.sheetName))],
+      ["xl/_rels/workbook.xml.rels", workbookRelsXml(worksheetCount)],
+      ["xl/styles.xml", stylesXml()]
+    ];
+
+    pageExports.forEach((pageExport) => {
+      files.push(
+        [`xl/worksheets/sheet${pageExport.sheetIndex}.xml`, planSheetXml(macroProject, pageExport.page, pageExport.sheetIndex)],
+        [`xl/worksheets/_rels/sheet${pageExport.sheetIndex}.xml.rels`, planSheetRelsXml(pageExport.drawingIndex)],
+        [`xl/drawings/drawing${pageExport.drawingIndex}.xml`, drawingXml(pageExport.rooms, pageExport.image.width, pageExport.image.height)],
+        [`xl/drawings/_rels/drawing${pageExport.drawingIndex}.xml.rels`, drawingRelsXml(pageExport.mediaName)],
+        [`xl/media/${pageExport.mediaName}`, pageExport.image.bytes]
+      );
+    });
+
+    files.push(
+      [`xl/worksheets/sheet${progressSheetIndex}.xml`, progressSheetXml(progressRows, macroProject, progressSheetIndex)],
       ["xl/vbaProject.bin", macroProject.bytes],
       ["docProps/core.xml", corePropsXml()],
-      ["docProps/app.xml", appPropsXml()]
-    ];
+      ["docProps/app.xml", appPropsXml(pageExports.map((pageExport) => pageExport.sheetName).concat("Progress"))]
+    );
 
     return {
       blob: new Blob([createZip(files)], {
@@ -986,11 +1133,11 @@
     };
   }
 
-  async function renderPlanToPng() {
-    const image = await loadImage(state.plan.src);
+  async function renderPlanToPng(plan = state.plan) {
+    const image = await loadImage(plan.src);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(state.plan.width || image.naturalWidth || 1200));
-    canvas.height = Math.max(1, Math.round(state.plan.height || image.naturalHeight || 800));
+    canvas.width = Math.max(1, Math.round(plan.width || image.naturalWidth || 1200));
+    canvas.height = Math.max(1, Math.round(plan.height || image.naturalHeight || 800));
     const context = canvas.getContext("2d", { alpha: false });
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -1034,7 +1181,7 @@
     const isPlaceholder = await isPlaceholderVbaProject(bytes);
     if (isPlaceholder) {
       const exportSnapshot = window.confirm(
-        "The Excel live-update macro template has not been installed yet. The workbook will export as a snapshot, but changing Progress column A, D, or E in Excel will not refresh labels, colours, or opacity. Export the snapshot anyway?"
+        "The Excel live-update macro template has not been installed yet. The workbook will export as a snapshot, but changing Progress columns A, B, E, or F in Excel will not refresh labels, colours, or opacity. Export the snapshot anyway?"
       );
       if (!exportSnapshot) {
         throw new Error("Excel live-update macro template is not installed yet. See vendor/excel/README.md for the one-time setup.");
@@ -1448,16 +1595,22 @@
     return bytes;
   }
 
-  function contentTypesXml() {
+  function contentTypesXml(worksheetCount = 2, drawingCount = 1) {
+    const worksheetOverrides = Array.from({ length: worksheetCount }, (_item, index) => (
+      `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+    )).join("");
+    const drawingOverrides = Array.from({ length: drawingCount }, (_item, index) => (
+      `<Override PartName="/xl/drawings/drawing${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`
+    )).join("");
+
     return xmlDecl(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
       <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
       <Default Extension="xml" ContentType="application/xml"/>
       <Default Extension="png" ContentType="image/png"/>
       <Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/>
       <Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>
-      <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-      <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-      <Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>
+      ${worksheetOverrides}
+      ${drawingOverrides}
       <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
       <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
       <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
@@ -1472,25 +1625,34 @@
     </Relationships>`);
   }
 
-  function workbookXml() {
+  function workbookXml(planSheetNames = ["Plan"]) {
+    const sheetNames = planSheetNames.concat("Progress");
+    const sheets = sheetNames.map((name, index) => (
+      `<sheet name="${xmlEscape(name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`
+    )).join("");
+
     return xmlDecl(`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
       <fileVersion appName="xl" lastEdited="7" lowestEdited="7" rupBuild="23426"/>
       <workbookPr codeName="ThisWorkbook"/>
       <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="18000" windowHeight="10000"/></bookViews>
       <sheets>
-        <sheet name="Plan" sheetId="1" r:id="rId1"/>
-        <sheet name="Progress" sheetId="2" r:id="rId2"/>
+        ${sheets}
       </sheets>
       <calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>
     </workbook>`);
   }
 
-  function workbookRelsXml() {
+  function workbookRelsXml(worksheetCount = 2) {
+    const worksheetRels = Array.from({ length: worksheetCount }, (_item, index) => (
+      `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`
+    )).join("");
+    const stylesId = worksheetCount + 1;
+    const vbaId = worksheetCount + 2;
+
     return xmlDecl(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-      <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
-      <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-      <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>
+      ${worksheetRels}
+      <Relationship Id="rId${stylesId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+      <Relationship Id="rId${vbaId}" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>
     </Relationships>`);
   }
 
@@ -1523,19 +1685,19 @@
     </styleSheet>`);
   }
 
-  function planSheetXml(macroProject) {
+  function planSheetXml(macroProject, page = defaultExcelPage(), sheetIndex = 1) {
     const statusMessage = macroProject.live
-      ? "Live macro included. Enable macros in Excel, then edits to Progress column A, D, or E update zone labels, colours, and opacity."
+      ? "Live macro included. Enable macros in Excel, then edits to Progress columns A, B, E, or F update zone labels, colours, and opacity."
       : "Snapshot export. Install the macro template before exporting if this workbook must update zone colours and labels in Excel.";
 
     return xmlDecl(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-      <sheetPr codeName="Sheet1"/>
+      <sheetPr codeName="Sheet${sheetIndex}"/>
       <sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews>
       <sheetFormatPr defaultRowHeight="15"/>
       <cols><col min="1" max="12" width="14" customWidth="1"/></cols>
       <sheetData>
         <row r="1" ht="24" customHeight="1">
-          ${cell("A1", "Floor Plan Progress Export", "inlineStr", 2)}
+          ${cell("A1", page.plan.name || page.name || "Floor Plan Progress Export", "inlineStr", 2)}
         </row>
         <row r="2">
           ${cell("A2", statusMessage, "inlineStr", 0)}
@@ -1546,66 +1708,80 @@
     </worksheet>`);
   }
 
-  function planSheetRelsXml() {
+  function defaultExcelPage() {
+    return Array.isArray(state.pages) && state.pages.length
+      ? activePage()
+      : pageFromLegacyProject(state);
+  }
+
+  function planSheetRelsXml(drawingIndex = 1) {
     return xmlDecl(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
+      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingIndex}.xml"/>
     </Relationships>`);
   }
 
-  function progressSheetXml(rooms, macroProject) {
+  function progressSheetXml(roomEntries = [], macroProject, sheetIndex = 2) {
+    const entries = roomEntries.map((entry) => (
+      entry && entry.room
+        ? entry
+        : { room: entry, sheetName: "Plan", plan: state.plan }
+    ));
     const refreshStatus = macroProject.live ? "Live macro included" : "Snapshot only";
     const refreshNote = macroProject.live
-      ? "Enable macros, then edit A, D, or E."
+      ? "Enable macros, then edit A, B, E, or F."
       : "Install macro template and export again for live updates.";
     const rows = [
-      `<row r="1">${cell("A1", "Room ID", "inlineStr", 1)}${cell("B1", "Zone Shape", "inlineStr", 1)}${cell("C1", "Current Colour", "inlineStr", 1)}${cell("D1", "Percent Complete", "inlineStr", 1)}${cell("E1", "Overlay Opacity", "inlineStr", 1)}${cell("F1", "Points", "inlineStr", 1)}${cell("G1", "Label Shape", "inlineStr", 1)}${cell("H1", "Excel Refresh", "inlineStr", 1)}${cell("I1", "Macro Source", "inlineStr", 1)}${cell("J1", "Note", "inlineStr", 1)}</row>`
+      `<row r="1">${cell("A1", "Room ID", "inlineStr", 1)}${cell("B1", "Plan Sheet", "inlineStr", 1)}${cell("C1", "Zone Shape", "inlineStr", 1)}${cell("D1", "Current Colour", "inlineStr", 1)}${cell("E1", "Percent Complete", "inlineStr", 1)}${cell("F1", "Overlay Opacity", "inlineStr", 1)}${cell("G1", "Points", "inlineStr", 1)}${cell("H1", "Label Shape", "inlineStr", 1)}${cell("I1", "Excel Refresh", "inlineStr", 1)}${cell("J1", "Macro Source", "inlineStr", 1)}${cell("K1", "Note", "inlineStr", 1)}</row>`
     ];
 
-    rooms.forEach((room, index) => {
+    entries.forEach((entry, index) => {
+      const room = entry.room;
       const row = index + 2;
       rows.push(`<row r="${row}">
         ${cell(`A${row}`, room.id, "inlineStr", 4)}
-        ${cell(`B${row}`, excelShapeName(room), "inlineStr", 4)}
-        ${formulaTextCell(`C${row}`, excelColourFormula(row), rgbToHex(progressColor(room.percent)), 4)}
-        ${cell(`D${row}`, room.percent, "n", 4)}
-        ${cell(`E${row}`, state.settings.opacity, "n", 4)}
-        ${cell(`F${row}`, JSON.stringify(room.points), "inlineStr", 4)}
-        ${cell(`G${row}`, excelLabelShapeName(room), "inlineStr", 4)}
-        ${index === 0 ? cell(`H${row}`, refreshStatus, "inlineStr", 4) : ""}
-        ${index === 0 ? cell(`I${row}`, macroProject.sourceName, "inlineStr", 4) : ""}
-        ${index === 0 ? cell(`J${row}`, refreshNote, "inlineStr", 4) : ""}
+        ${cell(`B${row}`, entry.sheetName || "Plan", "inlineStr", 4)}
+        ${cell(`C${row}`, excelShapeName(room), "inlineStr", 4)}
+        ${formulaTextCell(`D${row}`, excelColourFormula(row), rgbToHex(progressColor(room.percent)), 4)}
+        ${cell(`E${row}`, room.percent, "n", 4)}
+        ${cell(`F${row}`, state.settings.opacity, "n", 4)}
+        ${cell(`G${row}`, JSON.stringify(room.points), "inlineStr", 4)}
+        ${cell(`H${row}`, excelLabelShapeName(room), "inlineStr", 4)}
+        ${index === 0 ? cell(`I${row}`, refreshStatus, "inlineStr", 4) : ""}
+        ${index === 0 ? cell(`J${row}`, macroProject.sourceName, "inlineStr", 4) : ""}
+        ${index === 0 ? cell(`K${row}`, refreshNote, "inlineStr", 4) : ""}
       </row>`);
     });
 
-    if (!rooms.length) {
+    if (!entries.length) {
       rows.push(`<row r="2">
-        ${cell("H2", refreshStatus, "inlineStr", 4)}
-        ${cell("I2", macroProject.sourceName, "inlineStr", 4)}
-        ${cell("J2", refreshNote, "inlineStr", 4)}
+        ${cell("I2", refreshStatus, "inlineStr", 4)}
+        ${cell("J2", macroProject.sourceName, "inlineStr", 4)}
+        ${cell("K2", refreshNote, "inlineStr", 4)}
       </row>`);
     }
 
     return xmlDecl(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-      <sheetPr codeName="Sheet2"/>
+      <sheetPr codeName="Sheet${sheetIndex}"/>
       <sheetViews><sheetView workbookViewId="0"/></sheetViews>
       <sheetFormatPr defaultRowHeight="18"/>
       <cols>
         <col min="1" max="1" width="18" customWidth="1"/>
-        <col min="2" max="2" width="26" customWidth="1"/>
-        <col min="3" max="3" width="16" customWidth="1"/>
-        <col min="4" max="4" width="18" customWidth="1"/>
-        <col min="5" max="5" width="16" customWidth="1"/>
-        <col min="6" max="6" width="80" customWidth="1"/>
-        <col min="7" max="7" width="26" customWidth="1"/>
-        <col min="8" max="8" width="22" customWidth="1"/>
-        <col min="9" max="9" width="26" customWidth="1"/>
-        <col min="10" max="10" width="44" customWidth="1"/>
+        <col min="2" max="2" width="16" customWidth="1"/>
+        <col min="3" max="3" width="26" customWidth="1"/>
+        <col min="4" max="4" width="16" customWidth="1"/>
+        <col min="5" max="5" width="18" customWidth="1"/>
+        <col min="6" max="6" width="16" customWidth="1"/>
+        <col min="7" max="7" width="80" customWidth="1"/>
+        <col min="8" max="8" width="26" customWidth="1"/>
+        <col min="9" max="9" width="22" customWidth="1"/>
+        <col min="10" max="10" width="26" customWidth="1"/>
+        <col min="11" max="11" width="44" customWidth="1"/>
       </cols>
       <sheetData>${rows.join("")}</sheetData>
-      <autoFilter ref="A1:G${Math.max(1, rooms.length + 1)}"/>
+      <autoFilter ref="A1:K${Math.max(1, entries.length + 1)}"/>
       <dataValidations count="2">
-        <dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" sqref="D2:D${Math.max(2, rooms.length + 1)}"><formula1>0</formula1><formula2>100</formula2></dataValidation>
-        <dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" sqref="E2:E${Math.max(2, rooms.length + 1)}"><formula1>0</formula1><formula2>100</formula2></dataValidation>
+        <dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" sqref="E2:E${Math.max(2, entries.length + 1)}"><formula1>0</formula1><formula2>100</formula2></dataValidation>
+        <dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" sqref="F2:F${Math.max(2, entries.length + 1)}"><formula1>0</formula1><formula2>100</formula2></dataValidation>
       </dataValidations>
       <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
     </worksheet>`);
@@ -1629,9 +1805,9 @@
     </xdr:wsDr>`);
   }
 
-  function drawingRelsXml() {
+  function drawingRelsXml(mediaFileName = "floor-plan.png") {
     return xmlDecl(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/floor-plan.png"/>
+      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${xmlEscape(mediaFileName)}"/>
     </Relationships>`);
   }
 
@@ -1695,11 +1871,15 @@
   }
 
   function roomLabelAnchor(room, id) {
-    const bounds = pointBounds(room.points);
-    const width = Math.max(1, bounds.maxX - bounds.minX);
-    const height = Math.max(1, bounds.maxY - bounds.minY);
-    const percentFont = Math.round(clamp(Math.min(width / 4.2, height / 2.7), 9, 19) * 100);
-    const idFont = Math.round(clamp(percentFont * 0.72, 800, 1400));
+    const labelBox = roomLabelBox(room.points, room.id);
+    const width = Math.max(1, labelBox.width);
+    const height = Math.max(1, labelBox.height);
+    const percentText = `${room.percent}%`;
+    const percentFont = Math.round(excelLabelFontSize(percentText, width, height, 19) * 100);
+    const idFont = Math.round(Math.min(
+      excelLabelFontSize(room.id, width, height, 14),
+      (percentFont / 100) * 0.78
+    ) * 100);
     const shape = `<xdr:sp macro="">
       <xdr:nvSpPr>
         <xdr:cNvPr id="${id}" name="${xmlEscape(excelLabelShapeName(room))}" descr="${xmlEscape(`${room.id} label`)}"/>
@@ -1716,7 +1896,7 @@
         <a:lstStyle/>
         <a:p>
           <a:pPr algn="ctr"/>
-          <a:r><a:rPr lang="en-US" sz="${percentFont}" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(`${room.percent}%`)}</a:t></a:r>
+          <a:r><a:rPr lang="en-US" sz="${percentFont}" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Calibri"/></a:rPr><a:t>${xmlEscape(percentText)}</a:t></a:r>
         </a:p>
         <a:p>
           <a:pPr algn="ctr"/>
@@ -1725,7 +1905,203 @@
       </xdr:txBody>
     </xdr:sp>`;
 
-    return absoluteAnchor(bounds.minX, EXCEL_PLAN_TOP_OFFSET + bounds.minY, width, height, shape);
+    return absoluteAnchor(labelBox.x, EXCEL_PLAN_TOP_OFFSET + labelBox.y, width, height, shape);
+  }
+
+  function roomLabelBox(points, roomId = "") {
+    const bounds = pointBounds(points);
+    const fallback = {
+      x: bounds.minX,
+      y: bounds.minY,
+      width: Math.max(1, bounds.maxX - bounds.minX),
+      height: Math.max(1, bounds.maxY - bounds.minY)
+    };
+
+    if (!Array.isArray(points) || points.length < 3 || !Number.isFinite(fallback.x) || !Number.isFinite(fallback.y)) {
+      return fallback;
+    }
+
+    const textRatio = clamp((Math.max(4, String(roomId || "").length) * 8 + 26) / 34, 0.85, 3.8);
+    const ratios = uniqueNumbers([textRatio, 2.2, 1.55, 1.05, 0.78]);
+    const candidates = interiorLabelCandidates(points, bounds);
+    let best = null;
+
+    for (const center of candidates) {
+      for (const ratio of ratios) {
+        const box = largestCenteredLabelBox(points, bounds, center, ratio);
+        if (box && (!best || box.width * box.height > best.width * best.height)) {
+          best = box;
+        }
+      }
+    }
+
+    if (!best) return fallback;
+
+    const padding = Math.min(EXCEL_LABEL_BOX_PADDING, Math.max(0, Math.min(best.width, best.height) / 8));
+    return {
+      x: round(best.x + padding),
+      y: round(best.y + padding),
+      width: round(Math.max(1, best.width - padding * 2)),
+      height: round(Math.max(1, best.height - padding * 2))
+    };
+  }
+
+  function interiorLabelCandidates(points, bounds) {
+    const candidates = [];
+    const addCandidate = (point) => {
+      if (!point || !pointInPolygon(point, points)) return;
+      const key = `${Math.round(point[0] * 10)}|${Math.round(point[1] * 10)}`;
+      if (candidates.some((candidate) => `${Math.round(candidate[0] * 10)}|${Math.round(candidate[1] * 10)}` === key)) return;
+      candidates.push(point);
+    };
+
+    addCandidate(polygonCentroid(points));
+    addCandidate([(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2]);
+
+    const steps = 8;
+    for (let yIndex = 1; yIndex < steps; yIndex += 1) {
+      for (let xIndex = 1; xIndex < steps; xIndex += 1) {
+        addCandidate([
+          bounds.minX + ((bounds.maxX - bounds.minX) * xIndex) / steps,
+          bounds.minY + ((bounds.maxY - bounds.minY) * yIndex) / steps
+        ]);
+      }
+    }
+
+    return candidates;
+  }
+
+  function largestCenteredLabelBox(points, bounds, center, ratio) {
+    const maxHalfWidth = Math.min(center[0] - bounds.minX, bounds.maxX - center[0]);
+    const maxHalfHeight = Math.min(center[1] - bounds.minY, bounds.maxY - center[1]);
+    let low = 0;
+    let high = Math.min(maxHalfHeight, maxHalfWidth / ratio);
+    if (high <= 0) return null;
+
+    for (let index = 0; index < 18; index += 1) {
+      const halfHeight = (low + high) / 2;
+      const halfWidth = halfHeight * ratio;
+      const box = {
+        x: center[0] - halfWidth,
+        y: center[1] - halfHeight,
+        width: halfWidth * 2,
+        height: halfHeight * 2
+      };
+
+      if (rectangleInsidePolygon(box, points)) {
+        low = halfHeight;
+      } else {
+        high = halfHeight;
+      }
+    }
+
+    const height = low * 2;
+    const width = height * ratio;
+    if (width < 4 || height < 4) return null;
+
+    return {
+      x: center[0] - width / 2,
+      y: center[1] - height / 2,
+      width,
+      height
+    };
+  }
+
+  function rectangleInsidePolygon(box, points) {
+    const x1 = box.x;
+    const y1 = box.y;
+    const x2 = box.x + box.width;
+    const y2 = box.y + box.height;
+    const samples = [
+      [x1, y1], [x2, y1], [x2, y2], [x1, y2],
+      [(x1 + x2) / 2, y1], [x2, (y1 + y2) / 2],
+      [(x1 + x2) / 2, y2], [x1, (y1 + y2) / 2],
+      [(x1 + x2) / 2, (y1 + y2) / 2]
+    ];
+
+    if (samples.some((point) => !pointInPolygon(point, points))) return false;
+
+    const rectEdges = [
+      [[x1, y1], [x2, y1]],
+      [[x2, y1], [x2, y2]],
+      [[x2, y2], [x1, y2]],
+      [[x1, y2], [x1, y1]]
+    ];
+
+    for (const rectEdge of rectEdges) {
+      for (let index = 0; index < points.length; index += 1) {
+        const a = points[index];
+        const b = points[(index + 1) % points.length];
+        if (segmentsIntersect(rectEdge[0], rectEdge[1], a, b)) return false;
+      }
+    }
+
+    return true;
+  }
+
+  function pointInPolygon(point, polygon) {
+    const x = point[0];
+    const y = point[1];
+    let inside = false;
+
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+      const xi = polygon[i][0];
+      const yi = polygon[i][1];
+      const xj = polygon[j][0];
+      const yj = polygon[j][1];
+
+      if (pointOnSegment(point, polygon[j], polygon[i])) return true;
+      const intersects = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+      if (intersects) inside = !inside;
+    }
+
+    return inside;
+  }
+
+  function segmentsIntersect(a, b, c, d) {
+    const o1 = orientation(a, b, c);
+    const o2 = orientation(a, b, d);
+    const o3 = orientation(c, d, a);
+    const o4 = orientation(c, d, b);
+
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && pointOnSegment(c, a, b)) return true;
+    if (o2 === 0 && pointOnSegment(d, a, b)) return true;
+    if (o3 === 0 && pointOnSegment(a, c, d)) return true;
+    if (o4 === 0 && pointOnSegment(b, c, d)) return true;
+    return false;
+  }
+
+  function orientation(a, b, c) {
+    const value = ((b[1] - a[1]) * (c[0] - b[0])) - ((b[0] - a[0]) * (c[1] - b[1]));
+    if (Math.abs(value) < 0.0001) return 0;
+    return value > 0 ? 1 : 2;
+  }
+
+  function pointOnSegment(point, start, end) {
+    const cross = ((point[1] - start[1]) * (end[0] - start[0])) - ((point[0] - start[0]) * (end[1] - start[1]));
+    if (Math.abs(cross) > 0.0001) return false;
+    return point[0] >= Math.min(start[0], end[0]) - 0.0001
+      && point[0] <= Math.max(start[0], end[0]) + 0.0001
+      && point[1] >= Math.min(start[1], end[1]) - 0.0001
+      && point[1] <= Math.max(start[1], end[1]) + 0.0001;
+  }
+
+  function excelLabelFontSize(text, width, height, maxSize) {
+    const length = Math.max(1, String(text || "").length);
+    const widthFit = width / (length * 0.68);
+    const heightFit = height / 3.1;
+    return clamp(Math.min(widthFit, heightFit), 5, maxSize);
+  }
+
+  function uniqueNumbers(values) {
+    const seen = new Set();
+    return values.filter((value) => {
+      const key = Math.round(value * 100);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return Number.isFinite(value) && value > 0;
+    });
   }
 
   function absoluteAnchor(x, y, width, height, body) {
@@ -1748,13 +2124,14 @@
     </cp:coreProperties>`);
   }
 
-  function appPropsXml() {
+  function appPropsXml(sheetNames = ["Plan", "Progress"]) {
+    const sheetList = sheetNames.map((name) => `<vt:lpstr>${xmlEscape(name)}</vt:lpstr>`).join("");
     return xmlDecl(`<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
       <Application>Microsoft Excel</Application>
       <DocSecurity>0</DocSecurity>
       <ScaleCrop>false</ScaleCrop>
-      <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>2</vt:i4></vt:variant></vt:vector></HeadingPairs>
-      <TitlesOfParts><vt:vector size="2" baseType="lpstr"><vt:lpstr>Plan</vt:lpstr><vt:lpstr>Progress</vt:lpstr></vt:vector></TitlesOfParts>
+      <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>${sheetNames.length}</vt:i4></vt:variant></vt:vector></HeadingPairs>
+      <TitlesOfParts><vt:vector size="${sheetNames.length}" baseType="lpstr">${sheetList}</vt:vector></TitlesOfParts>
     </Properties>`);
   }
 
@@ -1837,8 +2214,8 @@
     return `<c r="${ref}" t="str"${styleAttr}><f>${xmlEscape(formula)}</f><v>${xmlEscape(cachedValue)}</v></c>`;
   }
 
-  function excelColourFormula(row) {
-    const p = `MAX(0,MIN(100,D${row}))`;
+  function excelColourFormula(row, percentColumn = "E") {
+    const p = `MAX(0,MIN(100,${percentColumn}${row}))`;
     const lowerAmount = `(${p}/50)`;
     const upperAmount = `((${p}-50)/50)`;
     const lower = `"#"&DEC2HEX(ROUND(216+(217-216)*${lowerAmount},0),2)&DEC2HEX(ROUND(66+(163-66)*${lowerAmount},0),2)&DEC2HEX(ROUND(47+(33-47)*${lowerAmount},0),2)`;
@@ -1865,6 +2242,10 @@
       maxX: Math.max(bounds.maxX, point[0]),
       maxY: Math.max(bounds.maxY, point[1])
     }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  }
+
+  function excelPlanSheetName(_page, index, pageCount) {
+    return pageCount > 1 ? `Plan ${index + 1}` : "Plan";
   }
 
   function excelShapeName(room) {
@@ -1976,44 +2357,58 @@
     const pdf = await window.pdfjsLib.getDocument({ data }).promise;
 
     try {
-      const pageNumber = choosePdfPageNumber(pdf.numPages);
-      const page = await pdf.getPage(pageNumber);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const scale = pdfRenderScale(baseViewport.width, baseViewport.height);
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
+      const baseName = file.name.replace(/\.[^.]+$/, "");
+      const pages = [];
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        el.saveStatus.textContent = `Loading PDF page ${pageNumber} of ${pdf.numPages}...`;
+        const page = await pdf.getPage(pageNumber);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const scale = pdfRenderScale(baseViewport.width, baseViewport.height);
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
 
-      const context = canvas.getContext("2d", { alpha: false });
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
+        const context = canvas.getContext("2d", { alpha: false });
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
 
-      await page.render({
-        canvasContext: context,
-        viewport,
-        background: "white"
-      }).promise;
+        await page.render({
+          canvasContext: context,
+          viewport,
+          background: "white"
+        }).promise;
 
-      let zlLabels = [];
-      try {
-        const textContent = await page.getTextContent();
-        zlLabels = extractZlLabelsFromTextContent(textContent, viewport, scale, canvas.width, canvas.height);
-      } catch (error) {
-        console.warn("Could not read PDF text labels for auto ZL detection.", error);
+        let zlLabels = [];
+        try {
+          const textContent = await page.getTextContent();
+          zlLabels = extractZlLabelsFromTextContent(textContent, viewport, scale, canvas.width, canvas.height);
+        } catch (error) {
+          console.warn(`Could not read PDF text labels on page ${pageNumber}.`, error);
+        }
+
+        const pageName = pdf.numPages > 1 ? `${baseName} - Page ${pageNumber}` : baseName;
+        pages.push({
+          id: `page-${pageNumber}`,
+          name: pageName,
+          plan: {
+            name: pageName,
+            src: canvas.toDataURL("image/png"),
+            sourceType: "pdf",
+            originalFileName: file.name,
+            pageNumber,
+            pageCount: pdf.numPages,
+            width: canvas.width,
+            height: canvas.height,
+            zlLabels
+          },
+          rooms: []
+        });
       }
 
-      const baseName = file.name.replace(/\.[^.]+$/, "");
       return {
-        name: pdf.numPages > 1 ? `${baseName} - Page ${pageNumber}` : baseName,
-        src: canvas.toDataURL("image/png"),
-        sourceType: "pdf",
-        originalFileName: file.name,
-        pageNumber,
-        pageCount: pdf.numPages,
-        width: canvas.width,
-        height: canvas.height,
-        zlLabels
+        name: baseName,
+        pages
       };
     } finally {
       if (typeof pdf.destroy === "function") {
@@ -2345,35 +2740,50 @@
     return Math.min(1.5, (coverage / AUTO_DETECT_WALL.minCoverage + ratio / AUTO_DETECT_WALL.minDarkRatio) / 2);
   }
 
-  function choosePdfPageNumber(pageCount) {
-    if (pageCount <= 1) return 1;
-    const answer = prompt(`This PDF has ${pageCount} pages. Which page number should be used?`, "1");
-    if (answer === null) {
-      const error = new Error("PDF loading cancelled.");
-      error.name = "AbortError";
-      throw error;
-    }
-    return clamp(Math.floor(Number(answer) || 1), 1, pageCount);
-  }
-
   function pdfRenderScale(width, height) {
     const longestEdge = Math.max(width, height) || PDF_RENDER_LONG_EDGE;
     return PDF_RENDER_LONG_EDGE / longestEdge;
   }
 
   function applyLoadedPlan(plan) {
-    const keepRooms = state.rooms.length && confirm("Keep existing room areas on this new floor plan?");
-    state.name = plan.name;
-    state.plan = plan;
+    const previousPages = (state.pages || []).map((page) => ({
+      rooms: clone(page.rooms || [])
+    }));
+    const keepRooms = countProjectRooms(state) && confirm("Keep existing room areas on this new floor plan?");
+    const loadedPages = Array.isArray(plan.pages) && plan.pages.length
+      ? plan.pages
+      : [{
+        id: "page-1",
+        name: plan.name,
+        plan,
+        rooms: []
+      }];
 
-    if (!keepRooms) {
-      state.rooms = [];
-      selectedRoomId = null;
-    }
+    state.name = plan.name;
+    state.pages = loadedPages.map((page, index) => ({
+      id: page.id || `page-${index + 1}`,
+      name: page.name || page.plan?.name || `Page ${index + 1}`,
+      plan: page.plan || page,
+      rooms: keepRooms ? clone(previousPages[index]?.rooms || []) : []
+    }));
+    state.activePageIndex = 0;
+    normalizeProject(state);
+
+    selectedRoomId = null;
+    draftPoints = [];
+    draggingVertex = null;
+    mode = "select";
 
     loadPlanImage(state.plan.src);
     queueSave();
     render();
+  }
+
+  function countProjectRooms(project = state) {
+    if (Array.isArray(project.pages) && project.pages.length) {
+      return project.pages.reduce((sum, page) => sum + (Array.isArray(page.rooms) ? page.rooms.length : 0), 0);
+    }
+    return Array.isArray(project.rooms) ? project.rooms.length : 0;
   }
 
   function queueSave() {
@@ -2394,10 +2804,10 @@
     return state.rooms.find((room) => room.id === selectedRoomId) || null;
   }
 
-  function uniqueRoomId(rawId, currentId) {
+  function uniqueRoomId(rawId, currentId, rooms = state.rooms) {
     const base = rawId || "ROOM";
     if (base === currentId) return base;
-    const existing = new Set(state.rooms.filter((room) => room.id !== currentId).map((room) => room.id.toLowerCase()));
+    const existing = new Set(rooms.filter((room) => room.id !== currentId).map((room) => room.id.toLowerCase()));
     if (!existing.has(base.toLowerCase())) return base;
     let index = 2;
     while (existing.has(`${base}-${index}`.toLowerCase())) {
@@ -2492,6 +2902,12 @@
     const percentIndex = hasHeader
       ? firstExistingIndex(header, ["percent", "percentage", "%", "complete", "progress"])
       : 1;
+    const pageIndex = hasHeader
+      ? optionalHeaderIndex(header, ["page", "page_index", "page number", "tab", "plan_page"])
+      : -1;
+    const pageNameIndex = hasHeader
+      ? optionalHeaderIndex(header, ["page_name", "page name", "plan", "plan_sheet", "sheet", "sheet_name"])
+      : -1;
     const pointsIndex = hasHeader
       ? optionalHeaderIndex(header, ["points", "polygon_points", "room_points", "points_json", "overlay_points"])
       : -1;
@@ -2507,11 +2923,44 @@
       .map((row) => ({
         id: String(row[roomIndex] || "").trim(),
         percent: clamp(Number(String(row[percentIndex] || "").replace("%", "").trim()) || 0, 0, 100),
+        pageIndex: pageIndex >= 0 ? parsePageIndex(row[pageIndex]) : null,
+        pageName: pageNameIndex >= 0 ? String(row[pageNameIndex] || "").trim() : "",
         points: pointsIndex >= 0 ? parseCsvPoints(row[pointsIndex]) : [],
         planWidth: planWidthIndex >= 0 ? Number(row[planWidthIndex]) : null,
         planHeight: planHeightIndex >= 0 ? Number(row[planHeightIndex]) : null
       }))
       .filter((row) => row.id);
+  }
+
+  function parsePageIndex(value) {
+    const text = String(value || "").trim();
+    const match = text.match(/\d+/);
+    if (!match) return null;
+    const pageNumber = Number(match[0]);
+    if (!Number.isFinite(pageNumber) || pageNumber < 1) return null;
+    return pageNumber - 1;
+  }
+
+  function resolveCsvUpdatePage(update) {
+    if (Number.isInteger(update.pageIndex) && state.pages[update.pageIndex]) {
+      return state.pages[update.pageIndex];
+    }
+
+    const normalizedName = String(update.pageName || "").trim().toLowerCase();
+    if (normalizedName) {
+      const match = state.pages.find((page, index) => {
+        const names = [
+          page.name,
+          page.plan.name,
+          excelPlanSheetName(page, index, state.pages.length),
+          `page ${index + 1}`
+        ].filter(Boolean).map((name) => String(name).toLowerCase());
+        return names.includes(normalizedName);
+      });
+      if (match) return match;
+    }
+
+    return activePage();
   }
 
   function optionalHeaderIndex(values, options) {
@@ -2542,10 +2991,10 @@
       .map((pair) => [pair[0], pair[1]]);
   }
 
-  function scaleImportedPoints(points, sourceWidth, sourceHeight) {
+  function scaleImportedPoints(points, sourceWidth, sourceHeight, plan = state.plan) {
     if (!Array.isArray(points)) return [];
-    const scaleX = sourceWidth && state.plan.width ? state.plan.width / sourceWidth : 1;
-    const scaleY = sourceHeight && state.plan.height ? state.plan.height / sourceHeight : 1;
+    const scaleX = sourceWidth && plan.width ? plan.width / sourceWidth : 1;
+    const scaleY = sourceHeight && plan.height ? plan.height / sourceHeight : 1;
 
     return points
       .map((point) => {
@@ -2554,8 +3003,8 @@
         const y = Number(point[1]);
         if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
         return [
-          round(clamp(x * scaleX, 0, state.plan.width)),
-          round(clamp(y * scaleY, 0, state.plan.height))
+          round(clamp(x * scaleX, 0, plan.width)),
+          round(clamp(y * scaleY, 0, plan.height))
         ];
       })
       .filter(Boolean);

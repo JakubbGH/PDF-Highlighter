@@ -27,6 +27,7 @@ const TEST_EXPORTS = [
   "zlLabelsFromDetectedText",
   "mergeDetectedZlLabels",
   "findBoxBoundaryForLabel",
+  "roomLabelBox",
   "copyVbaSourceCode",
   "fetchVbaSourceCode",
   "copyTextToClipboard",
@@ -299,14 +300,16 @@ async function run() {
   assert.equal(api.progressColor(100), "rgb(8, 88, 43)", "100% should be dark green");
 
   const csvText = [
-    "room_id,percent,points,plan_width,plan_height",
-    "A101,25,\"[[72,72],[357,72],[357,258],[72,258]]\",1200,800"
+    "page,page_name,room_id,percent,points,plan_width,plan_height",
+    "2,Plan 2,A101,25,\"[[72,72],[357,72],[357,258],[72,258]]\",1200,800"
   ].join("\n");
   const csvRows = api.parseCsv(csvText);
   const updates = api.csvRowsToUpdates(csvRows);
   assert.equal(updates.length, 1, "CSV should produce one room update");
   assert.equal(updates[0].id, "A101");
   assert.equal(updates[0].percent, 25);
+  assert.equal(updates[0].pageIndex, 1);
+  assert.equal(updates[0].pageName, "Plan 2");
   assert.equal(JSON.stringify(updates[0].points[2]), JSON.stringify([357, 258]));
   assert.equal(api.csvCell("[[1,2],[3,4]]"), '"[[1,2],[3,4]]"', "CSV cell quoting");
   assert.equal(JSON.stringify(api.parseCsvPoints("1:2;3:4")), JSON.stringify([[1, 2], [3, 4]]), "semicolon point parsing");
@@ -343,7 +346,7 @@ async function run() {
   assert(Math.abs(detectedBox.points[0][1] - 30) <= 5, "top wall detection");
   assert(Math.abs(detectedBox.points[2][1] - 120) <= 5, "bottom wall detection");
 
-  const vbaSource = "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\nIf Intersect(Target, Sh.Range(\"A:A,D:E\")) Is Nothing Then Exit Sub\nEnd Sub\nPublic Sub RefreshZoneColours()\nEnd Sub";
+  const vbaSource = "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\nIf Intersect(Target, Sh.Range(\"A:B,E:F\")) Is Nothing Then Exit Sub\nEnd Sub\nPublic Sub RefreshZoneColours()\nEnd Sub";
   let fetchedVbaUrl = "";
   let copiedText = "";
   context.fetch = async (url, options) => {
@@ -390,16 +393,29 @@ async function run() {
   const drawing = api.drawingXml([room], 1200, 800);
 
   assert.match(livePlan, /Live macro included/);
-  assert.match(livePlan, /column A, D, or E/);
-  assert.match(liveProgress, /<c r="D2" s="4"><v>25<\/v><\/c>/, "percent exports as numeric D cell");
+  assert.match(livePlan, /columns A, B, E, or F/);
+  assert.match(liveProgress, /<c r="B2" t="inlineStr" s="4"><is><t>Plan<\/t><\/is><\/c>/, "progress row exports target plan sheet");
+  assert.match(liveProgress, /<c r="E2" s="4"><v>25<\/v><\/c>/, "percent exports as numeric E cell");
   assert.match(liveProgress, /Live macro included/);
-  assert.match(liveProgress, /edit A, D, or E/);
+  assert.match(liveProgress, /edit A, B, E, or F/);
   assert.match(liveProgress, /local-template\.xlsm/);
   assert.match(snapshotProgress, /Snapshot only/);
   assert.match(snapshotProgress, /Install macro template/);
   assert.match(drawing, /name="Zone_A101"/);
   assert.match(drawing, /name="Label_A101"/);
   assert.match(drawing, /FFFFFF/, "label text should be white");
+
+  const lShapeRoom = {
+    id: "L101",
+    percent: 55,
+    points: [[0, 0], [120, 0], [120, 40], [40, 40], [40, 120], [0, 120]]
+  };
+  const lLabelBox = api.roomLabelBox(lShapeRoom.points, lShapeRoom.id);
+  assert(
+    lLabelBox.x + lLabelBox.width <= 40.1 || lLabelBox.y + lLabelBox.height <= 40.1,
+    `L-shaped room label should stay inside a coloured arm, got ${JSON.stringify(lLabelBox)}`
+  );
+  assert.match(api.drawingXml([lShapeRoom], 140, 140), /name="Label_L101"/, "L-shaped room label exports");
 
   const packageBytes = Buffer.from(api.createZip([
     ["[Content_Types].xml", api.contentTypesXml()],
@@ -415,6 +431,9 @@ async function run() {
   assert.equal(entries.find((entry) => entry.name === "xl/vbaProject.bin").bytes.length, 3);
   assert.match(entries.find((entry) => entry.name === "[Content_Types].xml").bytes.toString("utf8"), /macroEnabled\.main\+xml/);
   assert.match(entries.find((entry) => entry.name === "xl/_rels/workbook.xml.rels").bytes.toString("utf8"), /vbaProject/);
+  assert.match(api.contentTypesXml(3, 2), /\/xl\/worksheets\/sheet3\.xml/, "multi-page content types include extra worksheet");
+  assert.match(api.contentTypesXml(3, 2), /\/xl\/drawings\/drawing2\.xml/, "multi-page content types include extra drawing");
+  assert.match(api.workbookRelsXml(3), /worksheets\/sheet3\.xml/, "multi-page workbook rels include extra worksheet");
 
   const macroPayload = new Uint8Array(4096).map((_, index) => index % 251);
   const deflatedWorkbook = new Uint8Array(makeDeflatedZip("xl/vbaProject.bin", macroPayload));

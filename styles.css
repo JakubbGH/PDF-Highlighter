@@ -19,6 +19,7 @@
 
 html,
 body {
+  height: 100%;
   min-height: 100%;
 }
 
@@ -28,6 +29,7 @@ body {
   color: var(--text);
   font-family: "Segoe UI", Arial, sans-serif;
   font-size: 14px;
+  overflow: hidden;
 }
 
 button,
@@ -46,12 +48,14 @@ button:disabled {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
 .topbar {
+  flex: 0 0 auto;
   min-height: 72px;
   display: flex;
   align-items: center;
@@ -198,11 +202,14 @@ button:disabled {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 0;
+  overflow: hidden;
 }
 
 .side-panel {
+  height: 100%;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--panel);
   border-right: 1px solid var(--border);
 }
@@ -210,6 +217,14 @@ button:disabled {
 .panel-section {
   padding: 16px;
   border-bottom: 1px solid var(--border);
+}
+
+.side-panel .panel-section:first-child {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--panel);
+  box-shadow: 0 8px 18px rgba(28, 40, 55, 0.08);
 }
 
 .panel-section.compact {
@@ -407,7 +422,7 @@ input[type="range"] {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .plan-header {
@@ -464,6 +479,37 @@ input[type="range"] {
 
 .swatch.high {
   background: #08582b;
+}
+
+.page-tabs {
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 18px;
+  background: #f9fbfd;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-tabs[hidden] {
+  display: none;
+}
+
+.page-tab {
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.page-tab.is-active {
+  border-color: var(--accent);
+  background: #dff3f7;
+  color: #0a5367;
 }
 
 .stage-scroller {
@@ -596,6 +642,15 @@ input[type="range"] {
 }
 
 @media (max-width: 920px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+  }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;
@@ -608,12 +663,19 @@ input[type="range"] {
   .workspace {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(560px, 1fr);
+    overflow: visible;
   }
 
   .side-panel {
+    height: auto;
     max-height: none;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .side-panel .panel-section:first-child {
+    top: 0;
   }
 
   .plan-header {

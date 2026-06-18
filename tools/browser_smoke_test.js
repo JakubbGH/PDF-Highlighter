@@ -15,6 +15,10 @@
     .map((script) => script.getAttribute("src"))
     .filter(Boolean)
     .find((src) => src.startsWith("app.js"));
+  const stylesheet = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+    .map((link) => link.getAttribute("href"))
+    .filter(Boolean)
+    .find((href) => href.startsWith("styles.css"));
   const shapes = Array.from(document.querySelectorAll("polygon.room-shape[data-room-id]"));
   const labels = Array.from(document.querySelectorAll("g.room-label[data-room-id]"));
   const roomIds = shapes.map((shape) => shape.dataset.roomId).sort();
@@ -26,14 +30,23 @@
   const opacityValues = shapes
     .map((shape) => Number(shape.getAttribute("fill-opacity")))
     .filter(Number.isFinite);
+  const desktopLayout = window.innerWidth > 920;
+  const bodyStyle = getComputedStyle(document.body);
+  const sidePanelStyle = getComputedStyle(document.querySelector(".side-panel"));
+  const toolsStyle = getComputedStyle(document.querySelector(".side-panel .panel-section"));
 
   check("title", document.title === "Floor Plan Progress Tracker", document.title);
-  check("current app script", appScript === "app.js?v=19", appScript || "missing");
+  check("current app script", appScript === "app.js?v=20", appScript || "missing");
+  check("current stylesheet", stylesheet === "styles.css?v=3", stylesheet || "missing");
+  check("desktop body scroll lock", !desktopLayout || bodyStyle.overflow === "hidden", bodyStyle.overflow);
+  check("sidebar scroll pane", !desktopLayout || sidePanelStyle.overflowY === "auto", sidePanelStyle.overflowY);
+  check("sticky tools panel", !desktopLayout || toolsStyle.position === "sticky", toolsStyle.position);
   check("pdf support", document.documentElement.dataset.pdfSupport === "ready", document.documentElement.dataset.pdfSupport || "missing");
   check("floor image loaded", Boolean(floorImage?.getAttribute("src")), "missing floor image src");
   check("overlay viewBox", overlay?.getAttribute("viewBox") === "0 0 1200 800", overlay?.getAttribute("viewBox") || "missing");
   check("sample room count", shapes.length === 6, `found ${shapes.length}`);
   check("sample label count", labels.length === 6, `found ${labels.length}`);
+  check("page tabs ready", Boolean(document.getElementById("pageTabs")), "missing page tabs");
   check("sample room ids", JSON.stringify(roomIds) === JSON.stringify(["A101", "A102", "A103", "B201", "B202", "B203"]), roomIds.join(","));
   check("100 percent colour", b203?.getAttribute("fill") === "rgb(8, 88, 43)", b203?.getAttribute("fill") || "missing");
   check("transparent overlays", opacityValues.length === 6 && opacityValues.every((value) => value > 0 && value < 1), opacityValues.join(","));
@@ -55,6 +68,7 @@
     checks,
     details: {
       appScript,
+      stylesheet,
       roomIds,
       macroStatus: macroStatus?.textContent?.trim() || "",
       macroState: macroStatus?.dataset.state || "",

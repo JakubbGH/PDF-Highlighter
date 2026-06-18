@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Floor Plan Progress Tracker</title>
-    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="styles.css?v=3">
   </head>
   <body>
     <div class="app-shell">
@@ -169,6 +169,8 @@
             </div>
           </div>
 
+          <div class="page-tabs" id="pageTabs" aria-label="Plan pages"></div>
+
           <div class="stage-scroller" id="stageScroller">
             <div class="stage" id="stage">
               <img id="floorImage" alt="Floor plan background" draggable="false">
@@ -185,6 +187,6 @@
     <input id="macroTemplateInput" type="file" accept=".xlsm,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
 
     <script src="vendor/pdf.min.js?v=1"></script>
-    <script src="app.js?v=19"></script>
+    <script src="app.js?v=20"></script>
   </body>
 </html>

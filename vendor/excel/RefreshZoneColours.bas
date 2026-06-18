@@ -7,21 +7,29 @@ Public Sub RefreshZoneColours()
     Dim rowIndex As Long
 
     Set progressSheet = ThisWorkbook.Worksheets("Progress")
-    Set planSheet = ThisWorkbook.Worksheets("Plan")
     lastRow = progressSheet.Cells(progressSheet.Rows.Count, "A").End(xlUp).Row
 
     For rowIndex = 2 To lastRow
         Dim roomId As String
+        Dim planSheetName As String
         Dim shapeName As String
         Dim labelShapeName As String
         Dim percentValue As Double
         Dim opacityValue As Double
 
         roomId = CStr(progressSheet.Cells(rowIndex, "A").Value)
-        shapeName = CStr(progressSheet.Cells(rowIndex, "B").Value)
-        percentValue = CDbl(Val(Replace(CStr(progressSheet.Cells(rowIndex, "D").Value), "%", "")))
-        opacityValue = CDbl(Val(Replace(CStr(progressSheet.Cells(rowIndex, "E").Value), "%", ""))) / 100
-        labelShapeName = CStr(progressSheet.Cells(rowIndex, "G").Value)
+        planSheetName = CStr(progressSheet.Cells(rowIndex, "B").Value)
+        shapeName = CStr(progressSheet.Cells(rowIndex, "C").Value)
+        percentValue = CDbl(Val(Replace(CStr(progressSheet.Cells(rowIndex, "E").Value), "%", "")))
+        opacityValue = CDbl(Val(Replace(CStr(progressSheet.Cells(rowIndex, "F").Value), "%", ""))) / 100
+        labelShapeName = CStr(progressSheet.Cells(rowIndex, "H").Value)
+
+        If Len(planSheetName) = 0 Then planSheetName = "Plan"
+        Set planSheet = Nothing
+        On Error Resume Next
+        Set planSheet = ThisWorkbook.Worksheets(planSheetName)
+        On Error GoTo 0
+        If planSheet Is Nothing Then GoTo NextProgressRow
 
         If opacityValue < 0 Then opacityValue = 0
         If opacityValue > 1 Then opacityValue = 1
@@ -43,6 +51,8 @@ Public Sub RefreshZoneColours()
             End With
             On Error GoTo 0
         End If
+
+NextProgressRow:
     Next rowIndex
 End Sub
 
@@ -50,10 +60,15 @@ Private Sub UpdateZoneLabel(ByVal frame As TextFrame2, ByVal shapeWidth As Doubl
     Dim percentText As String
     Dim labelText As String
     Dim percentFontSize As Double
+    Dim idFontSize As Double
+    Dim idStart As Long
 
     percentText = CStr(Round(percentValue, 0)) & "%"
     labelText = percentText & vbCrLf & roomId
-    percentFontSize = LabelPercentFontSize(shapeWidth, shapeHeight)
+    percentFontSize = LabelLineFontSize(shapeWidth, shapeHeight, percentText, 18)
+    idFontSize = LabelLineFontSize(shapeWidth, shapeHeight, roomId, 14)
+    If percentFontSize * 0.78 < idFontSize Then idFontSize = percentFontSize * 0.78
+    idStart = Len(percentText) + Len(vbCrLf) + 1
 
     With frame
         .MarginLeft = 0
@@ -65,20 +80,29 @@ Private Sub UpdateZoneLabel(ByVal frame As TextFrame2, ByVal shapeWidth As Doubl
         .TextRange.Text = labelText
         .TextRange.ParagraphFormat.Alignment = msoAlignCenter
         .TextRange.Font.Bold = msoTrue
-        .TextRange.Font.Size = percentFontSize
+        .TextRange.Font.Size = idFontSize
         .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        If Len(percentText) > 0 Then .TextRange.Characters(1, Len(percentText)).Font.Size = percentFontSize
+        If Len(roomId) > 0 Then .TextRange.Characters(idStart, Len(roomId)).Font.Size = idFontSize
     End With
 End Sub
 
-Private Function LabelPercentFontSize(ByVal shapeWidth As Double, ByVal shapeHeight As Double) As Double
+Private Function LabelLineFontSize(ByVal shapeWidth As Double, ByVal shapeHeight As Double, ByVal labelText As String, ByVal maxSize As Double) As Double
     Dim sizeValue As Double
+    Dim widthSize As Double
+    Dim heightSize As Double
+    Dim textLength As Long
 
-    sizeValue = shapeWidth / 4
-    If shapeHeight / 2.4 < sizeValue Then sizeValue = shapeHeight / 2.4
-    If sizeValue < 9 Then sizeValue = 9
-    If sizeValue > 19 Then sizeValue = 19
+    textLength = Len(labelText)
+    If textLength < 1 Then textLength = 1
+    widthSize = shapeWidth / (textLength * 0.68)
+    heightSize = shapeHeight / 3.1
+    sizeValue = widthSize
+    If heightSize < sizeValue Then sizeValue = heightSize
+    If sizeValue < 5 Then sizeValue = 5
+    If sizeValue > maxSize Then sizeValue = maxSize
 
-    LabelPercentFontSize = sizeValue
+    LabelLineFontSize = sizeValue
 End Function
 
 Private Function ProgressColour(ByVal percentValue As Double) As Long

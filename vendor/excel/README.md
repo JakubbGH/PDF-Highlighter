@@ -2,7 +2,7 @@
 
 `vbaProject.bin` is the compiled macro project embedded into `.xlsm` exports. Excel shape fills and shape text cannot be changed by worksheet formulas alone, so the live recolouring depends on this binary containing the zone refresh macro.
 
-The current `vbaProject.bin` is a placeholder sample project. It makes the exported workbook structurally macro-enabled, but it does not contain the project-specific sheet-change macro yet. Until this file is replaced, exported workbooks will show the floor plan, zones, and labels, but changing `Progress!D:D` will not recolour the boxes or refresh the label text.
+The current `vbaProject.bin` is a placeholder sample project. It makes the exported workbook structurally macro-enabled, but it does not contain the project-specific sheet-change macro yet. Until this file is replaced, exported workbooks will show the floor plan, zones, and labels, but changing `Progress!E:E` will not recolour the boxes or refresh the label text.
 
 ## Option A: Install A Template In The Browser
 
@@ -32,7 +32,7 @@ The site extracts only `xl/vbaProject.bin` from the workbook and stores that com
 
 Future exports from the published site will include the compiled macro automatically once the repo file has been replaced.
 
-The refresh macro runs when the workbook opens and when `Progress` column A, D, or E changes. Column A updates the white room ID label, column D updates the percent and colour, and column E updates overlay transparency.
+The refresh macro runs when the workbook opens and when `Progress` columns A, B, E, or F change. Column A updates the white room ID label, column B points the row at the matching plan sheet, column E updates the percent and colour, and column F updates overlay transparency.
 
 ## Option C: Build And Replace The Repo Template Automatically
 
@@ -65,7 +65,7 @@ That stricter check fails if `vendor/excel/vbaProject.bin` is still the placehol
 py -3 tools\extract_vba_project.py floor-plan-macro-template.xlsm
 ```
 
-The script extracts `xl/vbaProject.bin` from the template and replaces `vendor/excel/vbaProject.bin`. Refresh the website, export a new workbook, enable macros in Excel, and then edits to `Progress` column `D` or `E` will update the zone colour, transparency, and white overlay label text.
+The script extracts `xl/vbaProject.bin` from the template and replaces `vendor/excel/vbaProject.bin`. Refresh the website, export a new workbook, enable macros in Excel, and then edits to `Progress` column `E` or `F` will update the zone colour, transparency, and white overlay label text.
 
 ## Source Files
 
