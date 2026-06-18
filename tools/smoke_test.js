@@ -24,6 +24,8 @@ const TEST_EXPORTS = [
   "csvCell",
   "extractZlCode",
   "zlLabelsFromTextRuns",
+  "zlLabelsFromDetectedText",
+  "mergeDetectedZlLabels",
   "findBoxBoundaryForLabel",
   "copyVbaSourceCode",
   "fetchVbaSourceCode",
@@ -318,6 +320,14 @@ async function run() {
   const zlLabels = api.zlLabelsFromTextRuns(zlRuns, 220, 150);
   assert.equal(zlLabels.length, 1, "ZL text runs should produce one label");
   assert.equal(zlLabels[0].id, "ZL204A");
+
+  const detectedTextLabels = api.zlLabelsFromDetectedText([
+    { rawValue: "Room ZL-301", boundingBox: { x: 81, y: 52, width: 58, height: 14 } },
+    { rawValue: "A101", boundingBox: { x: 10, y: 10, width: 30, height: 12 } }
+  ], 220, 150);
+  assert.equal(detectedTextLabels.length, 1, "drawing text detection should filter to ZL labels");
+  assert.equal(detectedTextLabels[0].id, "ZL-301");
+  assert.equal(JSON.stringify(api.mergeDetectedZlLabels(zlLabels, detectedTextLabels).map((label) => label.id).sort()), JSON.stringify(["ZL-301", "ZL204A"]));
 
   const roomImage = syntheticRoomImage();
   const detectedBox = api.findBoxBoundaryForLabel(roomImage, roomImage.width, roomImage.height, {

@@ -498,10 +498,10 @@
     el.opacityControl.value = String(state.settings.opacity);
     el.labelToggle.checked = Boolean(state.settings.showLabels);
     const zlLabelCount = (state.plan.zlLabels || []).length;
-    el.autoZlButton.disabled = !zlLabelCount;
+    el.autoZlButton.disabled = !state.plan.src;
     el.autoZlButton.title = zlLabelCount
       ? `Detect box-like boundaries for ${zlLabelCount} ZL label${zlLabelCount === 1 ? "" : "s"}`
-      : "Load a text-based PDF with ZL room labels to enable automatic detection";
+      : "Scan the visible drawing for ZL text, then detect box-like boundaries";
     el.toolHint.textContent = mode === "draw"
       ? `${draftPoints.length} point${draftPoints.length === 1 ? "" : "s"} placed. Click room corners, then Finish.`
       : "Select a room to edit it, or switch to Draw Room and click around a room boundary.";
@@ -703,10 +703,21 @@
   }
 
   async function autoDetectZlRooms() {
-    const labels = (state.plan.zlLabels || []).filter((label) => AUTO_ZL_ROOM_PATTERN.test(label.id));
+    let labels = (state.plan.zlLabels || []).filter((label) => AUTO_ZL_ROOM_PATTERN.test(label.id));
     if (!labels.length) {
-      alert("No ZL room labels were found in this plan. This needs a text-based PDF rather than a scanned image.");
-      return;
+      el.autoZlButton.disabled = true;
+      el.saveStatus.textContent = "Reading drawing text...";
+      const detectionResult = await detectZlLabelsFromDrawing();
+      labels = detectionResult.labels;
+      if (!labels.length) {
+        alert(detectionResult.message);
+        el.saveStatus.textContent = "No ZL text found";
+        renderControls();
+        return;
+      }
+      state.plan.zlLabels = mergeDetectedZlLabels(state.plan.zlLabels || [], labels);
+      queueSave();
+      render();
     }
 
     const existingZlRooms = state.rooms.filter((room) => AUTO_ZL_ROOM_PATTERN.test(room.id));
@@ -780,6 +791,11 @@
   }
 
   async function getPlanImageData() {
+    const { canvas, context } = await getPlanCanvas();
+    return context.getImageData(0, 0, canvas.width, canvas.height);
+  }
+
+  async function getPlanCanvas() {
     const image = await loadImage(state.plan.src);
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(state.plan.width || image.naturalWidth || 1200));
@@ -788,7 +804,36 @@
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return context.getImageData(0, 0, canvas.width, canvas.height);
+    return { canvas, context };
+  }
+
+  async function detectZlLabelsFromDrawing() {
+    const TextDetectorCtor = window.TextDetector || window.ShapeTextDetector || null;
+    if (typeof TextDetectorCtor !== "function") {
+      return {
+        labels: [],
+        message: "No ZL room labels were found, and this browser does not provide local drawing-text detection. The plan may have flattened text; use a browser with TextDetector support, a text-based PDF, or draw the ZL rooms manually."
+      };
+    }
+
+    try {
+      const { canvas } = await getPlanCanvas();
+      const detector = new TextDetectorCtor();
+      const detections = await detector.detect(canvas);
+      const labels = zlLabelsFromDetectedText(detections, canvas.width, canvas.height);
+      return {
+        labels,
+        message: labels.length
+          ? `${labels.length} ZL label${labels.length === 1 ? "" : "s"} found in the drawing.`
+          : "The drawing-text detector ran, but it did not find any text strings containing ZL."
+      };
+    } catch (error) {
+      console.warn("Drawing text detection failed.", error);
+      return {
+        labels: [],
+        message: "The browser could not read text from the drawing image. The plan may need a bundled OCR engine or manual ZL seed labels."
+      };
+    }
   }
 
   async function downloadExcelWorkbook() {
@@ -2043,6 +2088,70 @@
     }
 
     return labels;
+  }
+
+  function zlLabelsFromDetectedText(detections, planWidth, planHeight) {
+    if (!Array.isArray(detections)) return [];
+    const runs = detections
+      .map((detection) => detectedTextToRun(detection))
+      .filter(Boolean);
+    return zlLabelsFromTextRuns(runs, planWidth, planHeight);
+  }
+
+  function detectedTextToRun(detection) {
+    const text = String(detection && (detection.rawValue || detection.text || detection.value || "")).trim();
+    if (!text) return null;
+
+    const box = detection.boundingBox || detection.bounds || {};
+    const cornerPoints = Array.isArray(detection.cornerPoints) ? detection.cornerPoints : [];
+    const pointBoundsValue = cornerPoints.length
+      ? cornerPoints.reduce((bounds, point) => ({
+          minX: Math.min(bounds.minX, Number(point.x)),
+          minY: Math.min(bounds.minY, Number(point.y)),
+          maxX: Math.max(bounds.maxX, Number(point.x)),
+          maxY: Math.max(bounds.maxY, Number(point.y))
+        }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity })
+      : null;
+
+    const x = Number.isFinite(Number(box.x)) ? Number(box.x) : pointBoundsValue?.minX;
+    const y = Number.isFinite(Number(box.y)) ? Number(box.y) : pointBoundsValue?.minY;
+    const width = Number.isFinite(Number(box.width)) ? Number(box.width) : (pointBoundsValue ? pointBoundsValue.maxX - pointBoundsValue.minX : NaN);
+    const height = Number.isFinite(Number(box.height)) ? Number(box.height) : (pointBoundsValue ? pointBoundsValue.maxY - pointBoundsValue.minY : NaN);
+    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+
+    return {
+      text,
+      x,
+      y,
+      width,
+      height,
+      centerX: x + width / 2,
+      centerY: y + height / 2
+    };
+  }
+
+  function mergeDetectedZlLabels(existingLabels, newLabels) {
+    const merged = (existingLabels || [])
+      .map((label) => normalizeDetectedZlLabel(label))
+      .filter(Boolean);
+
+    for (const newLabel of newLabels || []) {
+      const normalized = normalizeDetectedZlLabel(newLabel);
+      if (!normalized) continue;
+
+      const match = merged.find((label) => (
+        label.id.toLowerCase() === normalized.id.toLowerCase()
+        && Math.abs(label.x - normalized.x) <= 12
+        && Math.abs(label.y - normalized.y) <= 12
+      ));
+      if (match) {
+        Object.assign(match, normalized);
+      } else {
+        merged.push(normalized);
+      }
+    }
+
+    return merged;
   }
 
   function pushZlCluster(labels, seen, cluster, planWidth, planHeight) {

@@ -28,7 +28,7 @@
     .filter(Number.isFinite);
 
   check("title", document.title === "Floor Plan Progress Tracker", document.title);
-  check("current app script", appScript === "app.js?v=18", appScript || "missing");
+  check("current app script", appScript === "app.js?v=19", appScript || "missing");
   check("pdf support", document.documentElement.dataset.pdfSupport === "ready", document.documentElement.dataset.pdfSupport || "missing");
   check("floor image loaded", Boolean(floorImage?.getAttribute("src")), "missing floor image src");
   check("overlay viewBox", overlay?.getAttribute("viewBox") === "0 0 1200 800", overlay?.getAttribute("viewBox") || "missing");
