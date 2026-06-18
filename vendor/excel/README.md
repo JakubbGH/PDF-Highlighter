@@ -7,16 +7,34 @@ The current `vbaProject.bin` is a placeholder sample project. It makes the expor
 ## Option A: Install A Template In The Browser
 
 1. Open Excel and create a new macro-enabled workbook.
-2. Press `Alt+F11` to open the VBA editor.
-3. Open `ThisWorkbook` in the template workbook.
-4. Paste in the full contents of `ThisWorkbookCode.bas`.
-5. Save the workbook as `.xlsm`, for example `floor-plan-macro-template.xlsm`.
-6. Open the local website and click **Install Macro**.
-7. Choose `floor-plan-macro-template.xlsm`.
+2. Open the website and click **Copy VBA**. If clipboard access is blocked, open the downloaded `ThisWorkbookCode.bas` file and copy all text.
+3. Press `Alt+F11` to open the VBA editor.
+4. Open `ThisWorkbook` in the template workbook.
+5. Paste the copied VBA code.
+6. Save the workbook as `.xlsm`, for example `floor-plan-macro-template.xlsm`.
+7. Return to the website and click **Install Macro**.
+8. Choose `floor-plan-macro-template.xlsm`.
 
 The site extracts only `xl/vbaProject.bin` from the workbook and stores that compiled VBA project in browser local storage. It is not uploaded anywhere. Future exports from that browser will use the installed VBA project.
 
-## Option B: Build And Replace The Repo Template Automatically
+## Option B: Replace The Repo Template Without PowerShell
+
+1. Open Excel and create a new macro-enabled workbook.
+2. Open the website and click **Copy VBA**. If clipboard access is blocked, open the downloaded `ThisWorkbookCode.bas` file and copy all text.
+3. Press `Alt+F11` to open the VBA editor.
+4. Open `ThisWorkbook` in the template workbook.
+5. Paste the copied VBA code.
+6. Save the workbook as `.xlsm`, for example `floor-plan-macro-template.xlsm`.
+7. Return to the website and click **Install Macro**.
+8. Choose `floor-plan-macro-template.xlsm`.
+9. Click **Macro Bin** to download `vbaProject.bin`.
+10. Replace this folder's `vbaProject.bin` with that downloaded file.
+
+Future exports from the published site will include the compiled macro automatically once the repo file has been replaced.
+
+The refresh macro runs when the workbook opens and when `Progress` column A, D, or E changes. Column A updates the white room ID label, column D updates the percent and colour, and column E updates overlay transparency.
+
+## Option C: Build And Replace The Repo Template Automatically
 
 If Excel is installed on the Windows machine, run this from the project root:
 
@@ -26,7 +44,15 @@ powershell -ExecutionPolicy Bypass -File tools\install_excel_macro_template.ps1
 
 The script creates a temporary `.xlsm`, inserts `ThisWorkbookCode.bas`, extracts the compiled `xl/vbaProject.bin`, and replaces `vendor/excel/vbaProject.bin`. Excel may require **Trust access to the VBA project object model** to be enabled in Trust Center.
 
-## Option C: Replace The Repo Template Manually
+After that, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\run_checks.ps1 -RequireCompiledMacro
+```
+
+That stricter check fails if `vendor/excel/vbaProject.bin` is still the placeholder sample project.
+
+## Option D: Replace The Repo Template Manually
 
 1. Open Excel and create a new macro-enabled workbook.
 2. Press `Alt+F11` to open the VBA editor.

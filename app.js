@@ -6,6 +6,7 @@
   const PDF_WORKER_SRC = "vendor/pdf.worker.min.js";
   const PDF_RENDER_LONG_EDGE = 2400;
   const EXCEL_VBA_PROJECT_SRC = "vendor/excel/vbaProject.bin";
+  const EXCEL_VBA_SOURCE_SRC = "vendor/excel/ThisWorkbookCode.bas";
   const PLACEHOLDER_VBA_PROJECT_SHA256 = "0ced1464b3677e98f5e3a8c5d80135e18dc98dca39299f1a8cfd2a00999fbf9f";
   const PLACEHOLDER_VBA_PROJECT_BYTES = 15872;
   const EXCEL_PLAN_TOP_OFFSET = 84;
@@ -79,7 +80,9 @@
     importCsvButton: document.getElementById("importCsvButton"),
     exportCsvButton: document.getElementById("exportCsvButton"),
     exportExcelButton: document.getElementById("exportExcelButton"),
+    copyVbaButton: document.getElementById("copyVbaButton"),
     installMacroButton: document.getElementById("installMacroButton"),
+    downloadMacroButton: document.getElementById("downloadMacroButton"),
     clearMacroButton: document.getElementById("clearMacroButton"),
     macroStatus: document.getElementById("macroStatus"),
     resetSampleButton: document.getElementById("resetSampleButton"),
@@ -188,7 +191,9 @@
     el.csvFileInput.addEventListener("change", handleCsvFile);
     el.exportCsvButton.addEventListener("click", downloadCsv);
     el.exportExcelButton.addEventListener("click", downloadExcelWorkbook);
+    el.copyVbaButton.addEventListener("click", copyVbaSourceCode);
     el.installMacroButton.addEventListener("click", () => el.macroTemplateInput.click());
+    el.downloadMacroButton.addEventListener("click", downloadInstalledMacroProject);
     el.clearMacroButton.addEventListener("click", clearInstalledMacroTemplate);
     el.macroTemplateInput.addEventListener("change", handleMacroTemplateFile);
     el.resetSampleButton.addEventListener("click", () => {
@@ -684,7 +689,7 @@
       saveInstalledVbaProject(vbaProject, file.name);
       el.saveStatus.textContent = "Macro installed";
       renderMacroStatus();
-      alert("Excel macro template installed locally. Future XLSM exports from this browser will update box colours and labels when macros are enabled in Excel.");
+      alert("Excel macro template installed locally. Future XLSM exports from this browser will update box colours and labels when macros are enabled in Excel. Use Macro Bin if you need the compiled file for the repo.");
     } catch (error) {
       alert(error.message || "The macro template could not be installed.");
       console.error(error);
@@ -695,12 +700,78 @@
     }
   }
 
+  async function copyVbaSourceCode() {
+    el.copyVbaButton.disabled = true;
+    el.saveStatus.textContent = "Loading VBA...";
+
+    try {
+      const sourceCode = await fetchVbaSourceCode();
+      const copied = await copyTextToClipboard(sourceCode);
+      if (copied) {
+        el.saveStatus.textContent = "VBA copied";
+        alert("VBA code copied. In Excel, press Alt+F11, open ThisWorkbook, paste it there, then save as .xlsm.");
+      } else {
+        downloadFile("ThisWorkbookCode.bas", sourceCode, "text/plain");
+        el.saveStatus.textContent = "VBA downloaded";
+        alert("Clipboard access was not available, so the VBA source file was downloaded instead. Open it, copy all text, paste it into ThisWorkbook in Excel, then save as .xlsm.");
+      }
+    } catch (error) {
+      downloadLinkedFile("ThisWorkbookCode.bas", EXCEL_VBA_SOURCE_SRC);
+      alert("The browser could not read the VBA source directly, so the source file was opened or downloaded instead. Copy all text from ThisWorkbookCode.bas, paste it into ThisWorkbook in Excel, then save as .xlsm.");
+      console.warn(error.message || "The VBA source could not be copied directly.", error);
+      el.saveStatus.textContent = "VBA file opened";
+    } finally {
+      el.copyVbaButton.disabled = false;
+    }
+  }
+
+  async function fetchVbaSourceCode() {
+    const response = await fetch(EXCEL_VBA_SOURCE_SRC, { cache: "no-cache" });
+    if (!response.ok) {
+      throw new Error("The VBA source file is missing. Upload vendor/excel/ThisWorkbookCode.bas with the site.");
+    }
+
+    const sourceCode = await response.text();
+    if (!/Workbook_SheetChange/.test(sourceCode) || !/RefreshZoneColours/.test(sourceCode) || !/A:A,D:E/.test(sourceCode)) {
+      throw new Error("The VBA source file does not look like the floor plan refresh macro.");
+    }
+    return sourceCode;
+  }
+
+  async function copyTextToClipboard(text) {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+      return false;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      console.warn("Clipboard copy failed; falling back to download.", error);
+      return false;
+    }
+  }
+
   function clearInstalledMacroTemplate() {
     if (!confirm("Remove the locally installed Excel macro template from this browser?")) return;
 
     localStorage.removeItem(VBA_PROJECT_STORAGE_KEY);
     el.saveStatus.textContent = "Macro removed";
     renderMacroStatus();
+  }
+
+  function downloadInstalledMacroProject() {
+    const installedProject = loadInstalledVbaProject();
+    if (!installedProject) {
+      alert("Install a macro template first.");
+      renderMacroStatus();
+      return;
+    }
+
+    downloadBlob("vbaProject.bin", new Blob([installedProject.bytes], {
+      type: "application/vnd.ms-office.vbaProject"
+    }));
+    el.saveStatus.textContent = "Macro bin downloaded";
   }
 
   async function buildExcelWorkbook() {
@@ -782,7 +853,7 @@
     const isPlaceholder = await isPlaceholderVbaProject(bytes);
     if (isPlaceholder) {
       const exportSnapshot = window.confirm(
-        "The Excel live-update macro template has not been installed yet. The workbook will export as a snapshot, but changing Progress column D or E in Excel will not recolour boxes or refresh labels. Export the snapshot anyway?"
+        "The Excel live-update macro template has not been installed yet. The workbook will export as a snapshot, but changing Progress column A, D, or E in Excel will not refresh labels, colours, or opacity. Export the snapshot anyway?"
       );
       if (!exportSnapshot) {
         throw new Error("Excel live-update macro template is not installed yet. See vendor/excel/README.md for the one-time setup.");
@@ -852,6 +923,7 @@
       ? `Exports use the locally installed macro template: ${sourceName}`
       : "Exports are snapshots until a macro template is installed.";
     el.macroStatus.dataset.state = isInstalled ? "live" : "snapshot";
+    el.downloadMacroButton.hidden = !isInstalled;
     el.clearMacroButton.hidden = !isInstalled;
     el.exportExcelButton.title = isInstalled
       ? "Download a live macro-enabled Excel workbook"
@@ -1272,7 +1344,7 @@
 
   function planSheetXml(macroProject) {
     const statusMessage = macroProject.live
-      ? "Live macro included. Enable macros in Excel, then edits on the Progress sheet update zone colours and labels."
+      ? "Live macro included. Enable macros in Excel, then edits to Progress column A, D, or E update zone labels, colours, and opacity."
       : "Snapshot export. Install the macro template before exporting if this workbook must update zone colours and labels in Excel.";
 
     return xmlDecl(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -1302,7 +1374,7 @@
   function progressSheetXml(rooms, macroProject) {
     const refreshStatus = macroProject.live ? "Live macro included" : "Snapshot only";
     const refreshNote = macroProject.live
-      ? "Enable macros, then edit D or E."
+      ? "Enable macros, then edit A, D, or E."
       : "Install macro template and export again for live updates.";
     const rows = [
       `<row r="1">${cell("A1", "Room ID", "inlineStr", 1)}${cell("B1", "Zone Shape", "inlineStr", 1)}${cell("C1", "Current Colour", "inlineStr", 1)}${cell("D1", "Percent Complete", "inlineStr", 1)}${cell("E1", "Overlay Opacity", "inlineStr", 1)}${cell("F1", "Points", "inlineStr", 1)}${cell("G1", "Label Shape", "inlineStr", 1)}${cell("H1", "Excel Refresh", "inlineStr", 1)}${cell("I1", "Macro Source", "inlineStr", 1)}${cell("J1", "Note", "inlineStr", 1)}</row>`
@@ -1998,6 +2070,15 @@
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  }
+
+  function downloadLinkedFile(fileName, href) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }
 
   function csvCell(value) {

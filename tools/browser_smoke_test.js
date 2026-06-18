@@ -28,7 +28,7 @@
     .filter(Number.isFinite);
 
   check("title", document.title === "Floor Plan Progress Tracker", document.title);
-  check("current app script", appScript === "app.js?v=12", appScript || "missing");
+  check("current app script", appScript === "app.js?v=16", appScript || "missing");
   check("pdf support", document.documentElement.dataset.pdfSupport === "ready", document.documentElement.dataset.pdfSupport || "missing");
   check("floor image loaded", Boolean(floorImage?.getAttribute("src")), "missing floor image src");
   check("overlay viewBox", overlay?.getAttribute("viewBox") === "0 0 1200 800", overlay?.getAttribute("viewBox") || "missing");
@@ -42,7 +42,9 @@
   check("header average", /6 rooms mapped, 51% average complete/.test(text("#planMeta")), text("#planMeta"));
   check("macro status", ["snapshot", "live"].includes(macroStatus?.dataset.state), macroStatus?.outerHTML || "missing");
   check("export button", Boolean(document.getElementById("exportExcelButton")), "missing export button");
+  check("copy VBA button", Boolean(document.getElementById("copyVbaButton")), "missing copy VBA button");
   check("macro installer", Boolean(document.getElementById("installMacroButton")), "missing install macro button");
+  check("macro bin button", Boolean(document.getElementById("downloadMacroButton")), "missing macro bin button");
   check("csv controls", Boolean(document.getElementById("importCsvButton") && document.getElementById("exportCsvButton")), "missing CSV controls");
   check("legend", document.querySelectorAll(".legend .swatch").length === 3, `found ${document.querySelectorAll(".legend .swatch").length}`);
 

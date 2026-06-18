@@ -64,7 +64,11 @@ $thisWorkbookComponent = $null
 
 try {
     Write-Host "Starting Excel..."
-    $excel = New-Object -ComObject Excel.Application
+    try {
+        $excel = New-Object -ComObject Excel.Application
+    } catch {
+        throw "Excel is not installed or is not registered for COM automation on this machine. Install/open Microsoft Excel, then run this script again. Original error: $($_.Exception.Message)"
+    }
     $excel.DisplayAlerts = $false
     $excel.Visible = $false
 

@@ -1,6 +1,7 @@
 param(
     [string]$NodePath,
-    [string]$PythonPath
+    [string]$PythonPath,
+    [switch]$RequireCompiledMacro
 )
 
 $ErrorActionPreference = "Stop"
@@ -111,7 +112,11 @@ try {
 
     $vbaHash = (Get-FileHash -Algorithm SHA256 -LiteralPath "vendor\excel\vbaProject.bin").Hash
     if ($vbaHash -eq $PlaceholderVbaHash) {
-        Write-Warning "vendor\excel\vbaProject.bin is still the placeholder sample macro. XLSM exports can still be installed with a local macro template in the browser, but repo-default exports will be snapshot-only until tools\install_excel_macro_template.ps1 is run on a machine with Excel."
+        $message = "vendor\excel\vbaProject.bin is still the placeholder sample macro. Repo-default exports will be snapshot-only until you replace it. Use the app's Install Macro + Macro Bin flow without PowerShell, or run tools\install_excel_macro_template.ps1 on a machine with Excel."
+        if ($RequireCompiledMacro) {
+            throw $message
+        }
+        Write-Warning $message
     } else {
         Write-Host "OK: compiled VBA project is not the placeholder sample."
     }

@@ -9,7 +9,7 @@ End Sub
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     If TypeName(Sh) <> "Worksheet" Then Exit Sub
     If Sh.Name <> "Progress" Then Exit Sub
-    If Intersect(Target, Sh.Range("D:E")) Is Nothing Then Exit Sub
+    If Intersect(Target, Sh.Range("A:A,D:E")) Is Nothing Then Exit Sub
 
     On Error GoTo CleanExit
     Application.EnableEvents = False

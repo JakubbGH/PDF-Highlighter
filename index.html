@@ -42,9 +42,17 @@
             <span aria-hidden="true">X</span>
             Export XLSM
           </button>
+          <button class="button" id="copyVbaButton" type="button" title="Copy or download the Excel VBA macro source">
+            <span aria-hidden="true">V</span>
+            Copy VBA
+          </button>
           <button class="button" id="installMacroButton" type="button" title="Install a local Excel macro template">
             <span aria-hidden="true">M</span>
             Install Macro
+          </button>
+          <button class="button" id="downloadMacroButton" type="button" title="Download the installed compiled Excel macro project" hidden>
+            <span aria-hidden="true">B</span>
+            Macro Bin
           </button>
           <button class="button" id="clearMacroButton" type="button" title="Remove the locally installed Excel macro template" hidden>
             <span aria-hidden="true">-</span>
@@ -173,6 +181,6 @@
     <input id="macroTemplateInput" type="file" accept=".xlsm,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
 
     <script src="vendor/pdf.min.js?v=1"></script>
-    <script src="app.js?v=12"></script>
+    <script src="app.js?v=16"></script>
   </body>
 </html>

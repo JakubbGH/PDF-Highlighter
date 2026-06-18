@@ -22,8 +22,12 @@ const TEST_EXPORTS = [
   "csvRowsToUpdates",
   "parseCsvPoints",
   "csvCell",
+  "copyVbaSourceCode",
+  "fetchVbaSourceCode",
+  "copyTextToClipboard",
   "renderMacroStatus",
   "saveInstalledVbaProject",
+  "downloadInstalledMacroProject",
   "loadVbaProject"
 ];
 
@@ -143,7 +147,7 @@ function loadAppHarness() {
   context.globalThis = context;
 
   vm.runInNewContext(source, context, { filename: appPath });
-  return { api: context.__testApi, elements, storage };
+  return { api: context.__testApi, elements, storage, context };
 }
 
 function makeDeflatedZip(name, data) {
@@ -242,7 +246,7 @@ function listZipEntries(bytes) {
 }
 
 async function run() {
-  const { api, elements } = loadAppHarness();
+  const { api, elements, context } = loadAppHarness();
 
   assert.equal(api.progressColor(0), "rgb(216, 66, 47)", "0% should be red");
   assert.equal(api.progressColor(50), "rgb(217, 163, 33)", "50% should be amber");
@@ -261,6 +265,44 @@ async function run() {
   assert.equal(api.csvCell("[[1,2],[3,4]]"), '"[[1,2],[3,4]]"', "CSV cell quoting");
   assert.equal(JSON.stringify(api.parseCsvPoints("1:2;3:4")), JSON.stringify([[1, 2], [3, 4]]), "semicolon point parsing");
 
+  const vbaSource = "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\nIf Intersect(Target, Sh.Range(\"A:A,D:E\")) Is Nothing Then Exit Sub\nEnd Sub\nPublic Sub RefreshZoneColours()\nEnd Sub";
+  let fetchedVbaUrl = "";
+  let copiedText = "";
+  context.fetch = async (url, options) => {
+    fetchedVbaUrl = url;
+    assert.equal(options.cache, "no-cache", "VBA source should bypass stale browser cache");
+    return {
+      ok: true,
+      async text() {
+        return vbaSource;
+      }
+    };
+  };
+  context.navigator.clipboard = {
+    async writeText(text) {
+      copiedText = text;
+    }
+  };
+  assert.equal(await api.fetchVbaSourceCode(), vbaSource, "VBA source fetch");
+  assert.equal(fetchedVbaUrl, "vendor/excel/ThisWorkbookCode.bas", "VBA source URL");
+  await api.copyVbaSourceCode();
+  assert.equal(copiedText, vbaSource, "VBA source should copy to clipboard");
+  assert.equal(elements.get("saveStatus").textContent, "VBA copied");
+  assert.equal(elements.get("copyVbaButton").disabled, false);
+
+  copiedText = "";
+  context.navigator.clipboard = null;
+  await api.copyVbaSourceCode();
+  assert.equal(copiedText, "", "clipboard should not be used when unavailable");
+  assert.equal(elements.get("saveStatus").textContent, "VBA downloaded");
+
+  context.fetch = async () => ({ ok: false });
+  const originalWarn = context.console.warn;
+  context.console.warn = () => {};
+  await api.copyVbaSourceCode();
+  context.console.warn = originalWarn;
+  assert.equal(elements.get("saveStatus").textContent, "VBA file opened", "blocked fetch should fall back to linked VBA file");
+
   const liveMacro = { live: true, sourceName: "local-template.xlsm", bytes: new Uint8Array([1, 2, 3]) };
   const snapshotMacro = { live: false, sourceName: "placeholder sample macro", bytes: new Uint8Array([4, 5, 6]) };
   const room = { id: "A101", percent: 25, points: [[72, 72], [357, 72], [357, 258], [72, 258]] };
@@ -270,8 +312,10 @@ async function run() {
   const drawing = api.drawingXml([room], 1200, 800);
 
   assert.match(livePlan, /Live macro included/);
+  assert.match(livePlan, /column A, D, or E/);
   assert.match(liveProgress, /<c r="D2" s="4"><v>25<\/v><\/c>/, "percent exports as numeric D cell");
   assert.match(liveProgress, /Live macro included/);
+  assert.match(liveProgress, /edit A, D, or E/);
   assert.match(liveProgress, /local-template\.xlsm/);
   assert.match(snapshotProgress, /Snapshot only/);
   assert.match(snapshotProgress, /Install macro template/);
@@ -308,10 +352,11 @@ async function run() {
   assert.equal(project.sourceName, "local-template.xlsm");
   assert.equal(elements.get("macroStatus").textContent, "Live XLSM");
   assert.equal(elements.get("macroStatus").dataset.state, "live");
+  assert.equal(elements.get("downloadMacroButton").hidden, false);
   assert.equal(elements.get("clearMacroButton").hidden, false);
   assert.match(elements.get("exportExcelButton").title, /live macro-enabled/);
 
-  console.log("Smoke test passed: CSV, colours, XLSM XML, ZIP packaging, macro extraction, and macro status.");
+  console.log("Smoke test passed: CSV, colours, VBA setup, XLSM XML, ZIP packaging, macro extraction, and macro status.");
 }
 
 run().catch((error) => {

@@ -15,7 +15,7 @@ Open `index.html` in a browser. The app runs fully in the browser and autosaves 
 5. Use **Save** to download a project JSON backup.
 6. Use **Import CSV** to update percentages later.
 7. Use **Export XLSM** to download a macro-enabled Excel workbook with the floor plan, zone shapes, and editable room progress table.
-8. Use **Install Macro** once if you have a macro template workbook and want exports from this browser to include the live Excel refresh macro.
+8. Use **Copy VBA** and **Install Macro** once if you want exports from this browser to include the live Excel refresh macro.
 
 CSV files can use either the simple progress-only format:
 
@@ -68,7 +68,9 @@ Upload these files to a GitHub repository:
 
 Then enable GitHub Pages for the repository branch. No build step is required.
 
-## Local Checks
+## Optional Developer Checks
+
+You do not need these commands to use the app, export workbooks, or publish the static site to GitHub Pages. They are only quick checks for a development machine that can run scripts.
 
 Run the full local check before publishing changes:
 
@@ -92,13 +94,28 @@ In this Codex workspace, use the bundled Node runtime if regular `node` is not i
 
 ## Excel Macro Setup
 
-If Excel is installed on the Windows machine, the helper below can create the macro template and install the compiled VBA project into the repo:
+Recommended no-PowerShell route:
+
+1. Open Excel and create a macro-enabled workbook.
+2. In the web app, click **Copy VBA**. If the browser cannot copy to the clipboard, it will download or open `ThisWorkbookCode.bas` instead.
+3. Press `Alt+F11` in Excel, open `ThisWorkbook`, paste the copied VBA code, and save as `.xlsm`.
+4. Return to the web app, click **Install Macro**, and choose that `.xlsm`.
+5. Click **Macro Bin** to download `vbaProject.bin`.
+6. Replace `vendor/excel/vbaProject.bin` in the repo with that downloaded file.
+
+If Excel is installed on a Windows machine that can run scripts, the helper below can create the macro template and install the compiled VBA project into the repo automatically:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\install_excel_macro_template.ps1
 ```
 
-If Excel blocks VBA project access, enable **Trust access to the VBA project object model** in Excel Trust Center and run it again. Without that compiled VBA project, `.xlsm` exports still open as snapshots, but Excel cannot recolour shapes when column D changes.
+Then run the strict publish check:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\run_checks.ps1 -RequireCompiledMacro
+```
+
+If Excel blocks VBA project access, enable **Trust access to the VBA project object model** in Excel Trust Center and run it again. Without that compiled VBA project, `.xlsm` exports still open as snapshots, but Excel cannot refresh labels, colours, or opacity when columns A, D, or E change.
 
 ## Notes
 
@@ -106,5 +123,5 @@ If Excel blocks VBA project access, enable **Trust access to the VBA project obj
 - Room boundaries are traced once, then saved in the project JSON.
 - The original drawing remains visible under the semi-transparent progress overlay.
 - Excel export creates an `.xlsm` package with editable room data on the `Progress` sheet, zone drawing shapes on the `Plan` sheet, and separate white text labels layered over each zone. `Percent Complete` is exported as a numeric 0-100 value in column D.
-- Live Excel-side recolouring needs a compiled VBA project. The browser can embed that file, but it cannot compile `.bas` source files itself. Use **Install Macro** to load a macro-enabled template locally in the browser, or replace `vendor/excel/vbaProject.bin` once for every copy of the site. See `vendor/excel/README.md`.
+- Live Excel-side recolouring needs a compiled VBA project. The browser can embed that file, but it cannot compile `.bas` source files itself. Use **Copy VBA** to prepare the Excel template, **Install Macro** to load it locally in the browser, or replace `vendor/excel/vbaProject.bin` once for every copy of the site. See `vendor/excel/README.md`.
 - Installed macro templates are stored only in your browser's local storage. Floor plans, PDFs, and templates are not uploaded by this static page.
