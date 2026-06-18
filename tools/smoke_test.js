@@ -22,6 +22,9 @@ const TEST_EXPORTS = [
   "csvRowsToUpdates",
   "parseCsvPoints",
   "csvCell",
+  "extractZlCode",
+  "zlLabelsFromTextRuns",
+  "findBoxBoundaryForLabel",
   "copyVbaSourceCode",
   "fetchVbaSourceCode",
   "copyTextToClipboard",
@@ -245,6 +248,47 @@ function listZipEntries(bytes) {
   return entries;
 }
 
+function syntheticRoomImage() {
+  const width = 220;
+  const height = 150;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let index = 0; index < data.length; index += 4) {
+    data[index] = 255;
+    data[index + 1] = 255;
+    data[index + 2] = 255;
+    data[index + 3] = 255;
+  }
+
+  function darkPixel(x, y) {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const index = ((y * width) + x) * 4;
+    data[index] = 0;
+    data[index + 1] = 0;
+    data[index + 2] = 0;
+    data[index + 3] = 255;
+  }
+
+  function line(x1, y1, x2, y2, gap) {
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    const minY = Math.min(y1, y2);
+    const maxY = Math.max(y1, y2);
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        if (gap && x >= gap.x1 && x <= gap.x2 && y >= gap.y1 && y <= gap.y2) continue;
+        darkPixel(x, y);
+      }
+    }
+  }
+
+  line(40, 30, 42, 120);
+  line(158, 30, 160, 120, { x1: 158, x2: 160, y1: 70, y2: 88 });
+  line(40, 30, 160, 32);
+  line(40, 118, 160, 120);
+
+  return { data, width, height };
+}
+
 async function run() {
   const { api, elements, context } = loadAppHarness();
 
@@ -264,6 +308,30 @@ async function run() {
   assert.equal(JSON.stringify(updates[0].points[2]), JSON.stringify([357, 258]));
   assert.equal(api.csvCell("[[1,2],[3,4]]"), '"[[1,2],[3,4]]"', "CSV cell quoting");
   assert.equal(JSON.stringify(api.parseCsvPoints("1:2;3:4")), JSON.stringify([[1, 2], [3, 4]]), "semicolon point parsing");
+  assert.equal(api.extractZlCode("Room ZL-101"), "ZL-101", "ZL code extraction");
+  assert.equal(api.extractZlCode("ZONE ZL 204A"), "ZL204A", "spaced ZL code extraction");
+
+  const zlRuns = [
+    { text: "ZL", x: 80, y: 50, width: 14, height: 10, centerX: 87, centerY: 55 },
+    { text: "204A", x: 98, y: 50, width: 28, height: 10, centerX: 112, centerY: 55 }
+  ];
+  const zlLabels = api.zlLabelsFromTextRuns(zlRuns, 220, 150);
+  assert.equal(zlLabels.length, 1, "ZL text runs should produce one label");
+  assert.equal(zlLabels[0].id, "ZL204A");
+
+  const roomImage = syntheticRoomImage();
+  const detectedBox = api.findBoxBoundaryForLabel(roomImage, roomImage.width, roomImage.height, {
+    id: "ZL204A",
+    x: 100,
+    y: 75,
+    width: 44,
+    height: 12
+  });
+  assert(detectedBox, "box detector should tolerate a door gap");
+  assert(Math.abs(detectedBox.points[0][0] - 40) <= 5, "left wall detection");
+  assert(Math.abs(detectedBox.points[1][0] - 160) <= 5, "right wall detection");
+  assert(Math.abs(detectedBox.points[0][1] - 30) <= 5, "top wall detection");
+  assert(Math.abs(detectedBox.points[2][1] - 120) <= 5, "bottom wall detection");
 
   const vbaSource = "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\nIf Intersect(Target, Sh.Range(\"A:A,D:E\")) Is Nothing Then Exit Sub\nEnd Sub\nPublic Sub RefreshZoneColours()\nEnd Sub";
   let fetchedVbaUrl = "";
@@ -356,7 +424,7 @@ async function run() {
   assert.equal(elements.get("clearMacroButton").hidden, false);
   assert.match(elements.get("exportExcelButton").title, /live macro-enabled/);
 
-  console.log("Smoke test passed: CSV, colours, VBA setup, XLSM XML, ZIP packaging, macro extraction, and macro status.");
+  console.log("Smoke test passed: CSV, colours, Auto ZL detection, VBA setup, XLSM XML, ZIP packaging, macro extraction, and macro status.");
 }
 
 run().catch((error) => {

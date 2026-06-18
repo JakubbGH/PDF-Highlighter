@@ -17,6 +17,8 @@ Open `index.html` in a browser. The app runs fully in the browser and autosaves 
 7. Use **Export XLSM** to download a macro-enabled Excel workbook with the floor plan, zone shapes, and editable room progress table.
 8. Use **Copy VBA** and **Install Macro** once if you want exports from this browser to include the live Excel refresh macro.
 
+For text-based PDFs with room IDs containing `ZL`, click **Auto ZL** after loading the plan. The app reads the PDF text layer locally, places pins on unmapped ZL labels, and tries to create box-like room boundaries by scanning for straight wall lines around each label. Door gaps are tolerated, but the result should still be reviewed and adjusted where the drawing is broken or busy.
+
 CSV files can use either the simple progress-only format:
 
 ```csv

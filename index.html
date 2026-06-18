@@ -75,6 +75,10 @@
               <button class="segment" id="drawModeButton" type="button">Draw Room</button>
             </div>
 
+            <button class="button subtle full" id="autoZlButton" type="button" title="Detect ZL room labels from a PDF and suggest box-like room boundaries" disabled>
+              Auto ZL
+            </button>
+
             <div class="draw-card" id="drawCard" hidden>
               <label for="draftRoomId">Room ID</label>
               <input id="draftRoomId" type="text" placeholder="A101" autocomplete="off">
@@ -181,6 +185,6 @@
     <input id="macroTemplateInput" type="file" accept=".xlsm,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
 
     <script src="vendor/pdf.min.js?v=1"></script>
-    <script src="app.js?v=16"></script>
+    <script src="app.js?v=18"></script>
   </body>
 </html>

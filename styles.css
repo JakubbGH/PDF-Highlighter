@@ -517,6 +517,28 @@ input[type="range"] {
   stroke-width: 3;
 }
 
+.zl-pin {
+  pointer-events: none;
+}
+
+.zl-pin circle {
+  fill: rgba(15, 111, 137, 0.9);
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.zl-pin text {
+  fill: #0b5368;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 850;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 3px;
+  text-anchor: middle;
+}
+
 .draft-line {
   fill: rgba(15, 111, 137, 0.12);
   stroke: #0f6f89;

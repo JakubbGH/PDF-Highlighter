@@ -11,6 +11,18 @@
   const PLACEHOLDER_VBA_PROJECT_BYTES = 15872;
   const EXCEL_PLAN_TOP_OFFSET = 84;
   const EMUS_PER_PIXEL = 9525;
+  const AUTO_ZL_ROOM_PATTERN = /ZL/i;
+  const AUTO_DETECT_WALL = {
+    darkThreshold: 150,
+    lineThickness: 5,
+    minCoverage: 0.38,
+    minDarkRatio: 0.055,
+    minRoomSize: 36,
+    minLabelDistance: 24,
+    scanStep: 2,
+    bandSize: 180,
+    maxSpanRatio: 0.46
+  };
   const DEFLATE_LENGTH_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
   const DEFLATE_LENGTH_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
   const DEFLATE_DISTANCE_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
@@ -58,6 +70,7 @@
     roomSearch: document.getElementById("roomSearch"),
     selectModeButton: document.getElementById("selectModeButton"),
     drawModeButton: document.getElementById("drawModeButton"),
+    autoZlButton: document.getElementById("autoZlButton"),
     drawCard: document.getElementById("drawCard"),
     toolHint: document.getElementById("toolHint"),
     draftRoomId: document.getElementById("draftRoomId"),
@@ -113,6 +126,7 @@
   function bindEvents() {
     el.selectModeButton.addEventListener("click", () => setMode("select"));
     el.drawModeButton.addEventListener("click", () => setMode("draw"));
+    el.autoZlButton.addEventListener("click", autoDetectZlRooms);
     el.finishRoomButton.addEventListener("click", finishDraftRoom);
     el.cancelDraftButton.addEventListener("click", cancelDraft);
     el.draftRoomId.addEventListener("input", updateFinishButton);
@@ -225,6 +239,9 @@
     project.plan.width = Number(project.plan.width) || 1200;
     project.plan.height = Number(project.plan.height) || 800;
     project.plan.sourceType = project.plan.sourceType || "image";
+    project.plan.zlLabels = Array.isArray(project.plan.zlLabels)
+      ? project.plan.zlLabels.map(normalizeDetectedZlLabel).filter(Boolean)
+      : [];
     project.rooms = Array.isArray(project.rooms) ? project.rooms : [];
     project.settings = Object.assign({ opacity: 48, showLabels: true, zoom: 1 }, project.settings || {});
     project.rooms.forEach((room, index) => {
@@ -312,6 +329,8 @@
       }
     }
 
+    renderDetectedZlPins();
+
     if (selectedRoomId && mode === "select") {
       const selected = getSelectedRoom();
       if (selected) {
@@ -386,6 +405,29 @@
     return group;
   }
 
+  function renderDetectedZlPins() {
+    const labels = state.plan.zlLabels || [];
+    if (!labels.length) return;
+
+    const mappedRoomIds = new Set(state.rooms.map((room) => room.id.toLowerCase()));
+    for (const label of labels) {
+      if (mappedRoomIds.has(label.id.toLowerCase())) continue;
+      const group = makeSvg("g", { class: "zl-pin", "data-room-id": label.id });
+      const marker = makeSvg("circle", {
+        cx: label.x,
+        cy: label.y,
+        r: 7
+      });
+      const text = makeSvg("text", {
+        x: label.x,
+        y: label.y - 12
+      });
+      text.textContent = label.id;
+      group.append(marker, text);
+      el.overlay.appendChild(group);
+    }
+  }
+
   function renderRoomList() {
     const query = el.roomSearch.value.trim().toLowerCase();
     const rooms = state.rooms
@@ -455,6 +497,11 @@
     el.drawCard.hidden = mode !== "draw";
     el.opacityControl.value = String(state.settings.opacity);
     el.labelToggle.checked = Boolean(state.settings.showLabels);
+    const zlLabelCount = (state.plan.zlLabels || []).length;
+    el.autoZlButton.disabled = !zlLabelCount;
+    el.autoZlButton.title = zlLabelCount
+      ? `Detect box-like boundaries for ${zlLabelCount} ZL label${zlLabelCount === 1 ? "" : "s"}`
+      : "Load a text-based PDF with ZL room labels to enable automatic detection";
     el.toolHint.textContent = mode === "draw"
       ? `${draftPoints.length} point${draftPoints.length === 1 ? "" : "s"} placed. Click room corners, then Finish.`
       : "Select a room to edit it, or switch to Draw Room and click around a room boundary.";
@@ -653,6 +700,95 @@
       ]));
     const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
     downloadFile(`${safeFileName(state.name)}-progress.csv`, csv, "text/csv");
+  }
+
+  async function autoDetectZlRooms() {
+    const labels = (state.plan.zlLabels || []).filter((label) => AUTO_ZL_ROOM_PATTERN.test(label.id));
+    if (!labels.length) {
+      alert("No ZL room labels were found in this plan. This needs a text-based PDF rather than a scanned image.");
+      return;
+    }
+
+    const existingZlRooms = state.rooms.filter((room) => AUTO_ZL_ROOM_PATTERN.test(room.id));
+    const replaceExisting = existingZlRooms.length
+      ? confirm(`There are already ${existingZlRooms.length} ZL room${existingZlRooms.length === 1 ? "" : "s"} mapped. Update their boundaries where detected?`)
+      : false;
+
+    el.autoZlButton.disabled = true;
+    el.saveStatus.textContent = "Detecting ZL rooms...";
+
+    try {
+      const imageData = await getPlanImageData();
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      let failed = 0;
+      const seen = new Set();
+
+      for (const label of labels) {
+        const key = label.id.toLowerCase();
+        if (seen.has(key)) {
+          skipped += 1;
+          continue;
+        }
+        seen.add(key);
+
+        const detection = findBoxBoundaryForLabel(imageData, imageData.width, imageData.height, label);
+        if (!detection) {
+          failed += 1;
+          continue;
+        }
+
+        const existing = state.rooms.find((room) => room.id.toLowerCase() === key);
+        if (existing) {
+          if (!replaceExisting) {
+            skipped += 1;
+            continue;
+          }
+          existing.points = detection.points;
+          updated += 1;
+        } else {
+          state.rooms.push({
+            id: uniqueRoomId(label.id),
+            percent: 0,
+            points: detection.points
+          });
+          created += 1;
+        }
+      }
+
+      if (created || updated) {
+        selectedRoomId = state.rooms.find((room) => AUTO_ZL_ROOM_PATTERN.test(room.id))?.id || selectedRoomId;
+        queueSave();
+        render();
+      }
+
+      const detail = [
+        created ? `${created} created` : "",
+        updated ? `${updated} updated` : "",
+        skipped ? `${skipped} skipped` : "",
+        failed ? `${failed} not boxed` : ""
+      ].filter(Boolean).join(", ") || "no changes";
+      alert(`Auto ZL detection finished: ${detail}. Review the boxes and adjust any doorway or broken-wall misses.`);
+    } catch (error) {
+      alert(error.message || "Auto ZL detection could not run.");
+      console.error(error);
+      el.saveStatus.textContent = "Use Save";
+    } finally {
+      renderControls();
+    }
+  }
+
+  async function getPlanImageData() {
+    const image = await loadImage(state.plan.src);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(state.plan.width || image.naturalWidth || 1200));
+    canvas.height = Math.max(1, Math.round(state.plan.height || image.naturalHeight || 800));
+    const context = canvas.getContext("2d", { alpha: false });
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return context.getImageData(0, 0, canvas.width, canvas.height);
   }
 
   async function downloadExcelWorkbook() {
@@ -1814,6 +1950,14 @@
         background: "white"
       }).promise;
 
+      let zlLabels = [];
+      try {
+        const textContent = await page.getTextContent();
+        zlLabels = extractZlLabelsFromTextContent(textContent, viewport, scale, canvas.width, canvas.height);
+      } catch (error) {
+        console.warn("Could not read PDF text labels for auto ZL detection.", error);
+      }
+
       const baseName = file.name.replace(/\.[^.]+$/, "");
       return {
         name: pdf.numPages > 1 ? `${baseName} - Page ${pageNumber}` : baseName,
@@ -1823,13 +1967,273 @@
         pageNumber,
         pageCount: pdf.numPages,
         width: canvas.width,
-        height: canvas.height
+        height: canvas.height,
+        zlLabels
       };
     } finally {
       if (typeof pdf.destroy === "function") {
         await pdf.destroy();
       }
     }
+  }
+
+  function extractZlLabelsFromTextContent(textContent, viewport, scale, planWidth, planHeight) {
+    const util = window.pdfjsLib && window.pdfjsLib.Util;
+    if (!textContent || !Array.isArray(textContent.items) || !util || typeof util.transform !== "function") {
+      return [];
+    }
+
+    const runs = textContent.items
+      .map((item) => {
+        const rawText = String(item.str || "").trim();
+        if (!rawText) return null;
+        const transform = util.transform(viewport.transform, item.transform);
+        const fontHeight = Math.max(7, Math.abs(item.height || transform[3] || 0) * scale);
+        const width = Math.max(rawText.length * fontHeight * 0.42, Math.abs(item.width || 0) * scale);
+        const x = transform[4];
+        const y = transform[5] - fontHeight;
+        return {
+          text: rawText,
+          x,
+          y,
+          width,
+          height: fontHeight,
+          centerX: x + width / 2,
+          centerY: y + fontHeight / 2
+        };
+      })
+      .filter(Boolean);
+
+    return zlLabelsFromTextRuns(runs, planWidth, planHeight);
+  }
+
+  function zlLabelsFromTextRuns(runs, planWidth, planHeight) {
+    const lines = [];
+    const sortedRuns = runs
+      .filter((run) => run && String(run.text || "").trim())
+      .sort((a, b) => (a.centerY - b.centerY) || (a.x - b.x));
+
+    for (const run of sortedRuns) {
+      const tolerance = Math.max(8, run.height * 0.85);
+      let line = lines.find((item) => Math.abs(item.centerY - run.centerY) <= tolerance);
+      if (!line) {
+        line = { centerY: run.centerY, runs: [] };
+        lines.push(line);
+      }
+      line.runs.push(run);
+      line.centerY = line.runs.reduce((sum, item) => sum + item.centerY, 0) / line.runs.length;
+    }
+
+    const labels = [];
+    const seen = new Set();
+    for (const line of lines) {
+      const lineRuns = line.runs.slice().sort((a, b) => a.x - b.x);
+      let cluster = [];
+      for (const run of lineRuns) {
+        const previous = cluster[cluster.length - 1];
+        const gap = previous ? run.x - (previous.x + previous.width) : 0;
+        const allowedGap = Math.max(28, run.height * 4);
+        if (previous && gap > allowedGap) {
+          pushZlCluster(labels, seen, cluster, planWidth, planHeight);
+          cluster = [];
+        }
+        cluster.push(run);
+      }
+      pushZlCluster(labels, seen, cluster, planWidth, planHeight);
+    }
+
+    return labels;
+  }
+
+  function pushZlCluster(labels, seen, cluster, planWidth, planHeight) {
+    if (!cluster.length) return;
+    const text = cluster.map((run) => run.text).join(" ");
+    const id = extractZlCode(text);
+    if (!id) return;
+
+    const bounds = cluster.reduce((box, run) => ({
+      minX: Math.min(box.minX, run.x),
+      minY: Math.min(box.minY, run.y),
+      maxX: Math.max(box.maxX, run.x + run.width),
+      maxY: Math.max(box.maxY, run.y + run.height)
+    }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+    const label = normalizeDetectedZlLabel({
+      id,
+      x: (bounds.minX + bounds.maxX) / 2,
+      y: (bounds.minY + bounds.maxY) / 2,
+      width: bounds.maxX - bounds.minX,
+      height: bounds.maxY - bounds.minY
+    }, planWidth, planHeight);
+    if (!label) return;
+
+    const key = `${label.id.toLowerCase()}|${Math.round(label.x / 8)}|${Math.round(label.y / 8)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    labels.push(label);
+  }
+
+  function normalizeDetectedZlLabel(label, planWidth = state.plan.width, planHeight = state.plan.height) {
+    const id = extractZlCode(label.id);
+    const x = Number(label.x);
+    const y = Number(label.y);
+    if (!id || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    return {
+      id,
+      x: round(clamp(x, 0, Number(planWidth) || 1)),
+      y: round(clamp(y, 0, Number(planHeight) || 1)),
+      width: round(Math.max(1, Number(label.width) || 1)),
+      height: round(Math.max(1, Number(label.height) || 1))
+    };
+  }
+
+  function extractZlCode(text) {
+    const value = String(text || "").toUpperCase().replace(/\s+/g, " ").trim();
+    const match = value.match(/\b([A-Z0-9]*ZL[\s_-]*[A-Z0-9_-]*)\b/);
+    if (!match) return "";
+    const code = match[1].replace(/\s+/g, "");
+    return code === "ZL" ? "" : code;
+  }
+
+  function findBoxBoundaryForLabel(imageData, width, height, label) {
+    const map = buildDarkPixelMap(imageData, width, height);
+    const cx = clamp(Math.round(label.x), 0, width - 1);
+    const cy = clamp(Math.round(label.y), 0, height - 1);
+    const minDistance = Math.max(AUTO_DETECT_WALL.minLabelDistance, Math.round(Math.max(label.width || 0, label.height || 0) * 0.85));
+    const maxXDistance = Math.max(minDistance + 8, Math.round(width * AUTO_DETECT_WALL.maxSpanRatio));
+    const maxYDistance = Math.max(minDistance + 8, Math.round(height * AUTO_DETECT_WALL.maxSpanRatio));
+
+    let left = findVerticalWall(map, width, height, cx, cy, -1, minDistance, maxXDistance);
+    let right = findVerticalWall(map, width, height, cx, cy, 1, minDistance, maxXDistance);
+    let top = null;
+    let bottom = null;
+
+    if (left && right) {
+      top = findHorizontalWall(map, width, height, cx, cy, -1, minDistance, maxYDistance, left.position, right.position);
+      bottom = findHorizontalWall(map, width, height, cx, cy, 1, minDistance, maxYDistance, left.position, right.position);
+    }
+
+    if ((!top || !bottom) && (!left || !right)) {
+      top = top || findHorizontalWall(map, width, height, cx, cy, -1, minDistance, maxYDistance);
+      bottom = bottom || findHorizontalWall(map, width, height, cx, cy, 1, minDistance, maxYDistance);
+      if (top && bottom) {
+        left = left || findVerticalWall(map, width, height, cx, cy, -1, minDistance, maxXDistance, top.position, bottom.position);
+        right = right || findVerticalWall(map, width, height, cx, cy, 1, minDistance, maxXDistance, top.position, bottom.position);
+      }
+    }
+
+    if (!left || !right || !top || !bottom) return null;
+    if (right.position - left.position < AUTO_DETECT_WALL.minRoomSize) return null;
+    if (bottom.position - top.position < AUTO_DETECT_WALL.minRoomSize) return null;
+    if (cx <= left.position || cx >= right.position || cy <= top.position || cy >= bottom.position) return null;
+
+    return {
+      confidence: round((left.score + right.score + top.score + bottom.score) / 4),
+      points: [
+        [round(left.position), round(top.position)],
+        [round(right.position), round(top.position)],
+        [round(right.position), round(bottom.position)],
+        [round(left.position), round(bottom.position)]
+      ]
+    };
+  }
+
+  function buildDarkPixelMap(imageData, width, height) {
+    const source = imageData.data || imageData;
+    const map = new Uint8Array(width * height);
+    for (let index = 0, pixel = 0; index < source.length; index += 4, pixel += 1) {
+      const alpha = source[index + 3];
+      if (alpha < 30) continue;
+      const luminance = (source[index] * 0.2126) + (source[index + 1] * 0.7152) + (source[index + 2] * 0.0722);
+      map[pixel] = luminance <= AUTO_DETECT_WALL.darkThreshold ? 1 : 0;
+    }
+    return map;
+  }
+
+  function findVerticalWall(map, width, height, cx, cy, direction, minDistance, maxDistance, topLimit, bottomLimit) {
+    const bandHalf = Math.min(AUTO_DETECT_WALL.bandSize / 2, Math.max(50, height * 0.08));
+    const y1 = topLimit == null ? cy - bandHalf : topLimit + 6;
+    const y2 = bottomLimit == null ? cy + bandHalf : bottomLimit - 6;
+
+    for (let distance = minDistance; distance <= maxDistance; distance += AUTO_DETECT_WALL.scanStep) {
+      const x = cx + direction * distance;
+      if (x <= 1 || x >= width - 2) break;
+      const score = verticalWallScore(map, width, height, x, y1, y2);
+      if (score >= 1) return { position: x, score };
+    }
+    return null;
+  }
+
+  function findHorizontalWall(map, width, height, cx, cy, direction, minDistance, maxDistance, leftLimit, rightLimit) {
+    const bandHalf = Math.min(AUTO_DETECT_WALL.bandSize / 2, Math.max(50, width * 0.08));
+    const x1 = leftLimit == null ? cx - bandHalf : leftLimit + 6;
+    const x2 = rightLimit == null ? cx + bandHalf : rightLimit - 6;
+
+    for (let distance = minDistance; distance <= maxDistance; distance += AUTO_DETECT_WALL.scanStep) {
+      const y = cy + direction * distance;
+      if (y <= 1 || y >= height - 2) break;
+      const score = horizontalWallScore(map, width, height, y, x1, x2);
+      if (score >= 1) return { position: y, score };
+    }
+    return null;
+  }
+
+  function verticalWallScore(map, width, height, x, y1, y2) {
+    const half = Math.floor(AUTO_DETECT_WALL.lineThickness / 2);
+    const startY = Math.max(0, Math.round(Math.min(y1, y2)));
+    const endY = Math.min(height - 1, Math.round(Math.max(y1, y2)));
+    let rowsWithDark = 0;
+    let darkPixels = 0;
+    let totalPixels = 0;
+
+    for (let y = startY; y <= endY; y += 1) {
+      let rowHasDark = false;
+      for (let offset = -half; offset <= half; offset += 1) {
+        const px = Math.round(x + offset);
+        if (px < 0 || px >= width) continue;
+        totalPixels += 1;
+        if (map[(y * width) + px]) {
+          darkPixels += 1;
+          rowHasDark = true;
+        }
+      }
+      if (rowHasDark) rowsWithDark += 1;
+    }
+
+    return wallScore(rowsWithDark, endY - startY + 1, darkPixels, totalPixels);
+  }
+
+  function horizontalWallScore(map, width, height, y, x1, x2) {
+    const half = Math.floor(AUTO_DETECT_WALL.lineThickness / 2);
+    const startX = Math.max(0, Math.round(Math.min(x1, x2)));
+    const endX = Math.min(width - 1, Math.round(Math.max(x1, x2)));
+    let columnsWithDark = 0;
+    let darkPixels = 0;
+    let totalPixels = 0;
+
+    for (let x = startX; x <= endX; x += 1) {
+      let columnHasDark = false;
+      for (let offset = -half; offset <= half; offset += 1) {
+        const py = Math.round(y + offset);
+        if (py < 0 || py >= height) continue;
+        totalPixels += 1;
+        if (map[(py * width) + x]) {
+          darkPixels += 1;
+          columnHasDark = true;
+        }
+      }
+      if (columnHasDark) columnsWithDark += 1;
+    }
+
+    return wallScore(columnsWithDark, endX - startX + 1, darkPixels, totalPixels);
+  }
+
+  function wallScore(linesWithDark, lineCount, darkPixels, totalPixels) {
+    if (!lineCount || !totalPixels) return 0;
+    const coverage = linesWithDark / lineCount;
+    const ratio = darkPixels / totalPixels;
+    if (coverage < AUTO_DETECT_WALL.minCoverage || ratio < AUTO_DETECT_WALL.minDarkRatio) return 0;
+    return Math.min(1.5, (coverage / AUTO_DETECT_WALL.minCoverage + ratio / AUTO_DETECT_WALL.minDarkRatio) / 2);
   }
 
   function choosePdfPageNumber(pageCount) {
