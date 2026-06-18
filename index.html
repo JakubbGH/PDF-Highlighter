@@ -18,9 +18,9 @@
         </div>
 
         <div class="toolbar" aria-label="Project actions">
-          <button class="button" id="loadPlanButton" type="button" title="Load a floor plan image or PDF">
+          <button class="button" id="loadPlanButton" type="button" title="Load one or more floor plan images or PDFs">
             <span aria-hidden="true">+</span>
-            Plan
+            Plans
           </button>
           <button class="button" id="loadProjectButton" type="button" title="Open a saved project JSON file">
             <span aria-hidden="true">^</span>
@@ -181,12 +181,12 @@
       </main>
     </div>
 
-    <input id="planFileInput" type="file" accept="application/pdf,.pdf,image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+    <input id="planFileInput" type="file" accept="application/pdf,.pdf,image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden>
     <input id="projectFileInput" type="file" accept="application/json,.json" hidden>
     <input id="csvFileInput" type="file" accept=".csv,text/csv" hidden>
     <input id="macroTemplateInput" type="file" accept=".xlsm,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
 
     <script src="vendor/pdf.min.js?v=1"></script>
-    <script src="app.js?v=20"></script>
+    <script src="app.js?v=21"></script>
   </body>
 </html>

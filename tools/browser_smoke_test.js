@@ -23,6 +23,7 @@
   const labels = Array.from(document.querySelectorAll("g.room-label[data-room-id]"));
   const roomIds = shapes.map((shape) => shape.dataset.roomId).sort();
   const macroStatus = document.getElementById("macroStatus");
+  const planFileInput = document.getElementById("planFileInput");
   const overlay = document.getElementById("overlay");
   const floorImage = document.getElementById("floorImage");
   const b203 = document.querySelector('polygon.room-shape[data-room-id="B203"]');
@@ -36,7 +37,7 @@
   const toolsStyle = getComputedStyle(document.querySelector(".side-panel .panel-section"));
 
   check("title", document.title === "Floor Plan Progress Tracker", document.title);
-  check("current app script", appScript === "app.js?v=20", appScript || "missing");
+  check("current app script", appScript === "app.js?v=21", appScript || "missing");
   check("current stylesheet", stylesheet === "styles.css?v=3", stylesheet || "missing");
   check("desktop body scroll lock", !desktopLayout || bodyStyle.overflow === "hidden", bodyStyle.overflow);
   check("sidebar scroll pane", !desktopLayout || sidePanelStyle.overflowY === "auto", sidePanelStyle.overflowY);
@@ -55,6 +56,7 @@
   check("header average", /6 rooms mapped, 51% average complete/.test(text("#planMeta")), text("#planMeta"));
   check("macro status", ["snapshot", "live"].includes(macroStatus?.dataset.state), macroStatus?.outerHTML || "missing");
   check("export button", Boolean(document.getElementById("exportExcelButton")), "missing export button");
+  check("multi-plan input", Boolean(planFileInput?.multiple), "plan file picker should allow multiple files");
   check("auto ZL button", Boolean(document.getElementById("autoZlButton")), "missing auto ZL button");
   check("copy VBA button", Boolean(document.getElementById("copyVbaButton")), "missing copy VBA button");
   check("macro installer", Boolean(document.getElementById("installMacroButton")), "missing install macro button");

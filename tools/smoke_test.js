@@ -28,6 +28,8 @@ const TEST_EXPORTS = [
   "mergeDetectedZlLabels",
   "findBoxBoundaryForLabel",
   "roomLabelBox",
+  "planToPages",
+  "projectNameFromFiles",
   "copyVbaSourceCode",
   "fetchVbaSourceCode",
   "copyTextToClipboard",
@@ -315,6 +317,22 @@ async function run() {
   assert.equal(JSON.stringify(api.parseCsvPoints("1:2;3:4")), JSON.stringify([[1, 2], [3, 4]]), "semicolon point parsing");
   assert.equal(api.extractZlCode("Room ZL-101"), "ZL-101", "ZL code extraction");
   assert.equal(api.extractZlCode("ZONE ZL 204A"), "ZL204A", "spaced ZL code extraction");
+  assert.equal(
+    api.projectNameFromFiles([{ name: "Building Level 01.pdf" }, { name: "Building Level 02.pdf" }]),
+    "Building Level",
+    "multi-file project name should use the shared filename prefix"
+  );
+  assert.deepEqual(
+    api.planToPages({
+      name: "Level Pack",
+      pages: [
+        { id: "page-1", name: "Level 01", plan: { name: "Level 01", src: "data:one", width: 10, height: 10 }, rooms: [] },
+        { id: "page-2", name: "Level 02", plan: { name: "Level 02", src: "data:two", width: 20, height: 20 }, rooms: [] }
+      ]
+    }, 1).map((page) => page.id),
+    ["file-2-page-1", "file-2-page-2"],
+    "multi-file PDFs should flatten into unique page ids"
+  );
 
   const zlRuns = [
     { text: "ZL", x: 80, y: 50, width: 14, height: 10, centerX: 87, centerY: 55 },

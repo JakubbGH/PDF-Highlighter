@@ -698,15 +698,15 @@
   }
 
   async function handlePlanFile(event) {
-    const file = event.target.files[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
-    if (!file) return;
+    if (!files.length) return;
 
     el.loadPlanButton.disabled = true;
-    el.saveStatus.textContent = "Loading plan...";
+    el.saveStatus.textContent = files.length === 1 ? "Loading plan..." : `Loading ${files.length} plans...`;
 
     try {
-      const plan = isPdfFile(file) ? await readPdfPlan(file) : await readImagePlan(file);
+      const plan = await readPlanFiles(files);
       applyLoadedPlan(plan);
     } catch (error) {
       if (error.name !== "AbortError") {
@@ -717,6 +717,72 @@
     } finally {
       el.loadPlanButton.disabled = false;
     }
+  }
+
+  async function readPlanFiles(files) {
+    const loadedPlans = [];
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      el.saveStatus.textContent = files.length === 1
+        ? "Loading plan..."
+        : `Loading ${index + 1} of ${files.length}: ${file.name}`;
+      loadedPlans.push(isPdfFile(file) ? await readPdfPlan(file) : await readImagePlan(file));
+    }
+
+    if (loadedPlans.length === 1) return loadedPlans[0];
+
+    return {
+      name: projectNameFromFiles(files),
+      pages: loadedPlans.flatMap((plan, fileIndex) => planToPages(plan, fileIndex))
+    };
+  }
+
+  function planToPages(plan, fileIndex = 0) {
+    const pages = Array.isArray(plan.pages) && plan.pages.length
+      ? plan.pages
+      : [{
+        id: "page-1",
+        name: plan.name,
+        plan,
+        rooms: []
+      }];
+
+    return pages.map((page, pageIndex) => {
+      const planData = page.plan || page;
+      const name = page.name || planData.name || `Plan ${fileIndex + 1}`;
+      return {
+        id: `file-${fileIndex + 1}-page-${pageIndex + 1}`,
+        name,
+        plan: Object.assign({}, planData, { name }),
+        rooms: Array.isArray(page.rooms) ? page.rooms : []
+      };
+    });
+  }
+
+  function projectNameFromFiles(files) {
+    const names = Array.from(files)
+      .map((file) => String(file.name || "").replace(/\.[^.]+$/, "").trim())
+      .filter(Boolean);
+    if (!names.length) return "Floor Plans";
+    if (names.length === 1) return names[0];
+
+    const prefix = commonFileNamePrefix(names);
+    return prefix || `${names[0]} + ${names.length - 1} more`;
+  }
+
+  function commonFileNamePrefix(names) {
+    let prefix = names[0] || "";
+    for (const name of names.slice(1)) {
+      while (prefix && !name.toLowerCase().startsWith(prefix.toLowerCase())) {
+        prefix = prefix.slice(0, -1);
+      }
+      if (!prefix) break;
+    }
+
+    return prefix
+      .replace(/[\s._-]*\d+$/g, "")
+      .replace(/[\s._-]+$/g, "")
+      .trim();
   }
 
   function handleProjectFile(event) {

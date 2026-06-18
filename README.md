@@ -8,8 +8,8 @@ Open `index.html` in a browser. The app runs fully in the browser and autosaves 
 
 ## Basic Workflow
 
-1. Click **Plan** and choose a PDF, PNG, JPG, WebP, or SVG floor plan.
-   Multi-page PDFs are loaded into separate page tabs.
+1. Click **Plans** and choose one or more PDF, PNG, JPG, WebP, or SVG floor plans.
+   Multi-page PDFs and multiple selected PDFs are loaded into separate page tabs.
 2. Click **Draw Room**.
 3. Enter the room code, click around the room boundary, then click **Finish**.
 4. Select a room and adjust its percent complete.
