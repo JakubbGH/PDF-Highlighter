@@ -161,7 +161,11 @@
             <div>
               <div class="plan-title-row">
                 <h2 id="planTitle">Sample Level 01</h2>
-                <button class="icon-button" id="renamePageButton" type="button" title="Rename this page">Rename</button>
+                <div class="plan-title-actions">
+                  <button class="icon-button" id="renamePageButton" type="button" title="Rename this page">Rename</button>
+                  <button class="icon-button" id="rotateLeftButton" type="button" title="Rotate this page left">Left</button>
+                  <button class="icon-button" id="rotateRightButton" type="button" title="Rotate this page right">Right</button>
+                </div>
               </div>
               <p id="planMeta">6 rooms mapped</p>
             </div>
@@ -190,6 +194,6 @@
     <input id="macroTemplateInput" type="file" accept=".xlsm,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
 
     <script src="vendor/pdf.min.js?v=1"></script>
-    <script src="app.js?v=23"></script>
+    <script src="app.js?v=24"></script>
   </body>
 </html>

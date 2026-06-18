@@ -32,6 +32,11 @@ const TEST_EXPORTS = [
   "projectNameFromFiles",
   "pageTabLabel",
   "excelPlanSheetNames",
+  "normalizeRotation",
+  "rotatedPlanSize",
+  "rotatePoint",
+  "rotatePoints",
+  "rotateDetectedLabel",
   "copyVbaSourceCode",
   "fetchVbaSourceCode",
   "copyTextToClipboard",
@@ -364,6 +369,16 @@ async function run() {
     ]),
     ["Ground Floor", "First Floor East", "Progress 2", "Ground Floor 2"],
     "Excel plan sheets should use unique safe page names"
+  );
+  assert.equal(api.normalizeRotation(-90), 270, "negative rotation normalization");
+  assert.equal(JSON.stringify(api.rotatedPlanSize(1200, 800, 90)), JSON.stringify({ width: 800, height: 1200 }), "90 degree rotation swaps page dimensions");
+  assert.equal(JSON.stringify(api.rotatePoint([100, 200], 1200, 800, 90)), JSON.stringify([600, 100]), "rotate point clockwise");
+  assert.equal(JSON.stringify(api.rotatePoint([100, 200], 1200, 800, 270)), JSON.stringify([200, 1100]), "rotate point counter-clockwise");
+  assert.equal(JSON.stringify(api.rotatePoints([[0, 0], [1200, 800]], 1200, 800, 180)), JSON.stringify([[1200, 800], [0, 0]]), "rotate room points 180 degrees");
+  assert.equal(
+    JSON.stringify(api.rotateDetectedLabel({ id: "ZL-1", x: 100, y: 200, width: 40, height: 12 }, 1200, 800, 90)),
+    JSON.stringify({ id: "ZL-1", x: 600, y: 100, width: 12, height: 40 }),
+    "rotated ZL labels should move and swap label bounds"
   );
 
   const zlRuns = [

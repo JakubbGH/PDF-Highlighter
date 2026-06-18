@@ -447,6 +447,13 @@ input[type="range"] {
   gap: 10px;
 }
 
+.plan-title-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .plan-header p {
   margin: 4px 0 0;
   color: var(--muted);

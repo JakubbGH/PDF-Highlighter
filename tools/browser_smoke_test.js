@@ -37,7 +37,7 @@
   const toolsStyle = getComputedStyle(document.querySelector(".side-panel .panel-section"));
 
   check("title", document.title === "Floor Plan Progress Tracker", document.title);
-  check("current app script", appScript === "app.js?v=23", appScript || "missing");
+  check("current app script", appScript === "app.js?v=24", appScript || "missing");
   check("current stylesheet", stylesheet === "styles.css?v=3", stylesheet || "missing");
   check("desktop body scroll lock", !desktopLayout || bodyStyle.overflow === "hidden", bodyStyle.overflow);
   check("sidebar scroll pane", !desktopLayout || sidePanelStyle.overflowY === "auto", sidePanelStyle.overflowY);
@@ -49,6 +49,7 @@
   check("sample label count", labels.length === 6, `found ${labels.length}`);
   check("page tabs ready", Boolean(document.getElementById("pageTabs")), "missing page tabs");
   check("rename page button", Boolean(document.getElementById("renamePageButton")), "missing rename page button");
+  check("rotate page buttons", Boolean(document.getElementById("rotateLeftButton") && document.getElementById("rotateRightButton")), "missing rotate buttons");
   check("sample room ids", JSON.stringify(roomIds) === JSON.stringify(["A101", "A102", "A103", "B201", "B202", "B203"]), roomIds.join(","));
   check("100 percent colour", b203?.getAttribute("fill") === "rgb(8, 88, 43)", b203?.getAttribute("fill") || "missing");
   check("transparent overlays", opacityValues.length === 6 && opacityValues.every((value) => value > 0 && value < 1), opacityValues.join(","));

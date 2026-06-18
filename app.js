@@ -62,6 +62,8 @@
     planTitle: document.getElementById("planTitle"),
     planMeta: document.getElementById("planMeta"),
     renamePageButton: document.getElementById("renamePageButton"),
+    rotateLeftButton: document.getElementById("rotateLeftButton"),
+    rotateRightButton: document.getElementById("rotateRightButton"),
     pageTabs: document.getElementById("pageTabs"),
     floorImage: document.getElementById("floorImage"),
     overlay: document.getElementById("overlay"),
@@ -202,6 +204,8 @@
     el.loadPlanButton.addEventListener("click", () => el.planFileInput.click());
     el.planFileInput.addEventListener("change", handlePlanFile);
     el.renamePageButton.addEventListener("click", renameActivePage);
+    el.rotateLeftButton.addEventListener("click", () => rotateActivePage(-90));
+    el.rotateRightButton.addEventListener("click", () => rotateActivePage(90));
     el.loadProjectButton.addEventListener("click", () => el.projectFileInput.click());
     el.projectFileInput.addEventListener("change", handleProjectFile);
     el.saveProjectButton.addEventListener("click", downloadProject);
@@ -277,6 +281,7 @@
     normalized.plan.width = Number(normalized.plan.width) || 1200;
     normalized.plan.height = Number(normalized.plan.height) || 800;
     normalized.plan.sourceType = normalized.plan.sourceType || "image";
+    normalized.plan.rotation = normalizeRotation(normalized.plan.rotation || 0);
     normalized.plan.zlLabels = Array.isArray(normalized.plan.zlLabels)
       ? normalized.plan.zlLabels
         .map((label) => normalizeDetectedZlLabel(label, normalized.plan.width, normalized.plan.height))
@@ -360,6 +365,8 @@
     el.planMeta.textContent = `${roomTotal} room${roomTotal === 1 ? "" : "s"} mapped, ${avg}% average complete${pdfMeta}${multiPageMeta}`;
     el.roomCount.textContent = String(roomTotal);
     el.renamePageButton.disabled = !state.pages.length;
+    el.rotateLeftButton.disabled = !state.pages.length || !state.plan.src;
+    el.rotateRightButton.disabled = !state.pages.length || !state.plan.src;
   }
 
   function renderPageTabs() {
@@ -447,6 +454,88 @@
     syncActivePageReferences();
     queueSave();
     render();
+  }
+
+  async function rotateActivePage(degrees) {
+    const page = activePage();
+    if (!page || !page.plan.src) return;
+
+    el.rotateLeftButton.disabled = true;
+    el.rotateRightButton.disabled = true;
+    el.saveStatus.textContent = "Rotating page...";
+
+    try {
+      const rotated = await rotatePageData(page, degrees);
+      page.plan = rotated.plan;
+      page.rooms = rotated.rooms;
+      syncActivePageReferences();
+      selectedRoomId = state.rooms.some((room) => room.id === selectedRoomId) ? selectedRoomId : null;
+      draftPoints = [];
+      draggingVertex = null;
+      loadPlanImage(state.plan.src);
+      queueSave();
+      render();
+    } catch (error) {
+      alert(error.message || "This page could not be rotated.");
+      console.error(error);
+      el.saveStatus.textContent = "Use Save";
+      renderHeader();
+    }
+  }
+
+  async function rotatePageData(page, degrees) {
+    const rotation = normalizeRotation(degrees);
+    if (!rotation) {
+      return {
+        plan: clone(page.plan),
+        rooms: clone(page.rooms || [])
+      };
+    }
+
+    const image = await loadImage(page.plan.src);
+    const sourceWidth = Math.max(1, Math.round(page.plan.width || image.naturalWidth || 1200));
+    const sourceHeight = Math.max(1, Math.round(page.plan.height || image.naturalHeight || 800));
+    const rotatedSize = rotatedPlanSize(sourceWidth, sourceHeight, rotation);
+    const canvas = document.createElement("canvas");
+    canvas.width = rotatedSize.width;
+    canvas.height = rotatedSize.height;
+    const context = canvas.getContext("2d", { alpha: false });
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    applyCanvasRotation(context, sourceWidth, sourceHeight, rotation);
+    context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+
+    const rotatedPlan = Object.assign({}, page.plan, {
+      src: canvas.toDataURL("image/png"),
+      width: rotatedSize.width,
+      height: rotatedSize.height,
+      rotation: normalizeRotation((Number(page.plan.rotation) || 0) + rotation),
+      zlLabels: (page.plan.zlLabels || [])
+        .map((label) => rotateDetectedLabel(label, sourceWidth, sourceHeight, rotation))
+        .filter(Boolean)
+    });
+    const rotatedRooms = (page.rooms || []).map((room) => Object.assign({}, room, {
+      points: rotatePoints(room.points || [], sourceWidth, sourceHeight, rotation)
+    }));
+
+    return {
+      plan: rotatedPlan,
+      rooms: rotatedRooms
+    };
+  }
+
+  function applyCanvasRotation(context, width, height, rotation) {
+    if (rotation === 90) {
+      context.translate(height, 0);
+      context.rotate(Math.PI / 2);
+    } else if (rotation === 180) {
+      context.translate(width, height);
+      context.rotate(Math.PI);
+    } else if (rotation === 270) {
+      context.translate(0, width);
+      context.rotate(-Math.PI / 2);
+    }
   }
 
   function renderStageSize() {
@@ -2360,6 +2449,61 @@
       maxX: Math.max(bounds.maxX, point[0]),
       maxY: Math.max(bounds.maxY, point[1])
     }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  }
+
+  function normalizeRotation(value) {
+    return ((Math.round(Number(value) / 90) * 90) % 360 + 360) % 360;
+  }
+
+  function rotatedPlanSize(width, height, rotation) {
+    const normalized = normalizeRotation(rotation);
+    return normalized === 90 || normalized === 270
+      ? { width: height, height: width }
+      : { width, height };
+  }
+
+  function rotatePoints(points, width, height, rotation) {
+    const normalized = normalizeRotation(rotation);
+    const size = rotatedPlanSize(width, height, normalized);
+    return (points || [])
+      .map((point) => rotatePoint(point, width, height, normalized))
+      .filter(Boolean)
+      .map((point) => [
+        round(clamp(point[0], 0, size.width)),
+        round(clamp(point[1], 0, size.height))
+      ]);
+  }
+
+  function rotatePoint(point, width, height, rotation) {
+    if (!Array.isArray(point) || point.length < 2) return null;
+    const x = Number(point[0]);
+    const y = Number(point[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    switch (normalizeRotation(rotation)) {
+      case 90:
+        return [height - y, x];
+      case 180:
+        return [width - x, height - y];
+      case 270:
+        return [y, width - x];
+      default:
+        return [x, y];
+    }
+  }
+
+  function rotateDetectedLabel(label, width, height, rotation) {
+    const point = rotatePoint([label.x, label.y], width, height, rotation);
+    if (!point) return null;
+    const normalized = normalizeRotation(rotation);
+    const swapSize = normalized === 90 || normalized === 270;
+    return normalizeDetectedZlLabel({
+      id: label.id,
+      x: point[0],
+      y: point[1],
+      width: swapSize ? label.height : label.width,
+      height: swapSize ? label.width : label.height
+    }, rotatedPlanSize(width, height, normalized).width, rotatedPlanSize(width, height, normalized).height);
   }
 
   function excelPlanSheetNames(pages = state.pages || []) {
