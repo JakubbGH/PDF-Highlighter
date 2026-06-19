@@ -37,8 +37,8 @@
   const toolsStyle = getComputedStyle(document.querySelector(".side-panel .panel-section"));
 
   check("title", document.title === "Floor Plan Progress Tracker", document.title);
-  check("current app script", appScript === "app.js?v=24", appScript || "missing");
-  check("current stylesheet", stylesheet === "styles.css?v=3", stylesheet || "missing");
+  check("current app script", appScript === "app.js?v=25", appScript || "missing");
+  check("current stylesheet", stylesheet === "styles.css?v=4", stylesheet || "missing");
   check("desktop body scroll lock", !desktopLayout || bodyStyle.overflow === "hidden", bodyStyle.overflow);
   check("sidebar scroll pane", !desktopLayout || sidePanelStyle.overflowY === "auto", sidePanelStyle.overflowY);
   check("sticky tools panel", !desktopLayout || toolsStyle.position === "sticky", toolsStyle.position);
@@ -54,6 +54,7 @@
   check("100 percent colour", b203?.getAttribute("fill") === "rgb(8, 88, 43)", b203?.getAttribute("fill") || "missing");
   check("transparent overlays", opacityValues.length === 6 && opacityValues.every((value) => value > 0 && value < 1), opacityValues.join(","));
   check("label text", a101Label?.textContent?.includes("15%") && a101Label?.textContent?.includes("A101"), a101Label?.textContent || "missing");
+  check("labels hidden until hover", getComputedStyle(a101Label).opacity === "0", getComputedStyle(a101Label).opacity);
   check("room list count", document.querySelectorAll(".room-item").length === 6, `found ${document.querySelectorAll(".room-item").length}`);
   check("header average", /6 rooms mapped, 51% average complete/.test(text("#planMeta")), text("#planMeta"));
   check("macro status", ["snapshot", "live"].includes(macroStatus?.dataset.state), macroStatus?.outerHTML || "missing");

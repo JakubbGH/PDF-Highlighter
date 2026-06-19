@@ -627,6 +627,16 @@ input[type="range"] {
   vector-effect: non-scaling-stroke;
 }
 
+.room-label {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.room-label.is-hovered {
+  opacity: 1;
+}
+
 .room-label text {
   fill: #111a24;
   font-family: "Segoe UI", Arial, sans-serif;

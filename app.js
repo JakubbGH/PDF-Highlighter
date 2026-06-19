@@ -570,6 +570,8 @@
         selectedRoomId = room.id;
         render();
       });
+      polygon.addEventListener("pointerenter", () => setHoveredRoomLabel(room.id, true));
+      polygon.addEventListener("pointerleave", () => setHoveredRoomLabel(room.id, false));
       el.overlay.appendChild(polygon);
     }
 
@@ -617,6 +619,13 @@
         }));
       });
     }
+  }
+
+  function setHoveredRoomLabel(roomId, isHovered) {
+    const label = Array.from(el.overlay.querySelectorAll(".room-label"))
+      .find((item) => item.dataset.roomId === roomId);
+    if (!label) return;
+    label.classList.toggle("is-hovered", isHovered);
   }
 
   function makeRoomLabel(room) {

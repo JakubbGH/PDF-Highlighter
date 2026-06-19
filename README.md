@@ -127,7 +127,7 @@ If Excel blocks VBA project access, enable **Trust access to the VBA project obj
 - PDF plans are rendered in the browser. Multi-page PDFs become page tabs in the app; renamed page tabs become the plan worksheet names in Excel.
 - Page rotation is saved per tab. Excel export uses each page's current rotation, including rotated overlays and ZL pins.
 - Room boundaries are traced once, then saved in the project JSON.
-- The original drawing remains visible under the semi-transparent progress overlay.
+- The original drawing remains visible under the semi-transparent progress overlay. In the web app, room labels appear when hovering over a coloured room; Excel exports still include the labels on the shapes.
 - Excel export creates an `.xlsm` package with editable room data on the `Progress` sheet, zone drawing shapes on the named plan sheet for each page, and separate white text labels layered over each zone. `Percent Complete` is exported as a numeric 0-100 value in column E. `Progress` column B stores the exact plan worksheet name used by the macro.
 - Live Excel-side recolouring needs a compiled VBA project. The browser can embed that file, but it cannot compile `.bas` source files itself. Use **Copy VBA** to prepare the Excel template, **Install Macro** to load it locally in the browser, or replace `vendor/excel/vbaProject.bin` once for every copy of the site. See `vendor/excel/README.md`.
 - Installed macro templates are stored only in your browser's local storage. Floor plans, PDFs, and templates are not uploaded by this static page.
